@@ -1,0 +1,118 @@
+import { apiDelete, apiGet, apiList, apiPatch, apiPost, apiPostFormData, apiPut } from "./client";
+import type {
+  AuditLog,
+  CollectionCenter,
+  CollectionTrip,
+  CollectionTripIncident,
+  CollectionTripTelemetryPoint,
+  CollectionTripStop,
+  CommercialRole,
+  Driver,
+  Device,
+  EvidenceFile,
+  MaterialFamily,
+  Material,
+  Party,
+  Payment,
+  PrintLog,
+  PurchaseOperation,
+  PriceList,
+  PriceListItem,
+  PriceSuggestion,
+  Route,
+  SaleItem,
+  SaleOrder,
+  TicketItem,
+  User,
+  Vehicle,
+} from "../types";
+
+export const api = {
+  login: (username: string, password: string) => apiPost<{ token: string; user: User }>("/auth/login/", { username, password }),
+  centers: () => apiList<CollectionCenter>("/collection-centers/"),
+  centerCreate: (payload: Record<string, unknown>) => apiPost<CollectionCenter>("/collection-centers/", payload),
+  centerUpdate: (id: string, payload: Record<string, unknown>) => apiPut<CollectionCenter>(`/collection-centers/${id}/`, payload),
+  centerPatch: (id: string, payload: Record<string, unknown>) => apiPatch<CollectionCenter>(`/collection-centers/${id}/`, payload),
+  centerDelete: (id: string) => apiDelete<void>(`/collection-centers/${id}/`),
+  commercialRoles: () => apiList<CommercialRole>("/commercial-roles/"),
+  materialFamilies: () => apiList<MaterialFamily>("/material-families/"),
+  materialCreate: (payload: Record<string, unknown>) => apiPost<Material>("/materials/", payload),
+  materialUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Material>(`/materials/${id}/`, payload),
+  materialDelete: (id: string) => apiDelete<void>(`/materials/${id}/`),
+  priceLists: () => apiList<PriceList>("/price-lists/"),
+  priceListCreate: (payload: Record<string, unknown>) => apiPost<PriceList>("/price-lists/", payload),
+  priceListUpdate: (id: string, payload: Record<string, unknown>) => apiPut<PriceList>(`/price-lists/${id}/`, payload),
+  priceListDelete: (id: string) => apiDelete<void>(`/price-lists/${id}/`),
+  priceListItems: () => apiList<PriceListItem>("/price-list-items/"),
+  priceListItemCreate: (payload: Record<string, unknown>) => apiPost<PriceListItem>("/price-list-items/", payload),
+  priceListItemUpdate: (id: string, payload: Record<string, unknown>) => apiPut<PriceListItem>(`/price-list-items/${id}/`, payload),
+  priceListItemDelete: (id: string) => apiDelete<void>(`/price-list-items/${id}/`),
+  routeCreate: (payload: Record<string, unknown>) => apiPost<Route>("/routes/", payload),
+  routeUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Route>(`/routes/${id}/`, payload),
+  routeDelete: (id: string) => apiDelete<void>(`/routes/${id}/`),
+  partyCreate: (payload: Record<string, unknown>) => apiPost<Party>("/parties/", payload),
+  partyUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Party>(`/parties/${id}/`, payload),
+  partyPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Party>(`/parties/${id}/`, payload),
+  partyDelete: (id: string) => apiDelete<void>(`/parties/${id}/`),
+  parties: () => apiList<Party>("/parties/"),
+  materials: () => apiList<Material>("/materials/"),
+  vehicles: () => apiList<Vehicle>("/vehicles/"),
+  drivers: () => apiList<Driver>("/drivers/"),
+  devices: () => apiList<Device>("/devices/"),
+  routes: () => apiList<Route>("/routes/"),
+  operations: () => apiList<PurchaseOperation>("/purchase-operations/"),
+  operationDetail: (id: string) => apiGet<PurchaseOperation>(`/purchase-operations/${id}/`),
+  operationCreate: (payload: Record<string, unknown>) => apiPost<PurchaseOperation>("/purchase-operations/open/", payload),
+  operationStatusChange: (id: string, status: string, reason = "") =>
+    apiPost<PurchaseOperation>(`/purchase-operations/${id}/status_change/`, { status, reason }),
+  operationPrint: (id: string, payload: Record<string, unknown>) => apiPost<Record<string, unknown>>(`/purchase-operations/${id}/print_ticket/`, payload),
+  ticketItems: () => apiList<TicketItem>("/ticket-items/"),
+  createTicketItem: (payload: Record<string, unknown>) => apiPost<TicketItem>("/ticket-items/", payload),
+  updateTicketItem: (id: string, payload: Record<string, unknown>) => apiPut<TicketItem>(`/ticket-items/${id}/`, payload),
+  adjustTicketItem: (id: string, payload: Record<string, unknown>) => apiPost<TicketItem>(`/ticket-items/${id}/adjust/`, payload),
+  payments: () => apiList<Payment>("/payments/"),
+  createPayment: (payload: Record<string, unknown>) => apiPost<Payment>("/payments/", payload),
+  printLogs: () => apiList<PrintLog>("/print-logs/"),
+  reprintLog: (id: string) => apiPost<PrintLog>(`/print-logs/${id}/reprint/`, {}),
+  auditLogs: () => apiList<AuditLog>("/audit-logs/"),
+  saleOrders: (params?: Record<string, string | undefined>) => {
+    const query = params
+      ? Object.entries(params)
+          .filter(([, value]) => value)
+          .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value as string)}`)
+          .join("&")
+      : "";
+    return apiList<SaleOrder>(query ? `/sale-orders/?${query}` : "/sale-orders/");
+  },
+  saleOrderOpen: (payload: Record<string, unknown>) => apiPost<SaleOrder>("/sale-orders/open/", payload),
+  saleOrderClose: (id: string) => apiPost<SaleOrder>(`/sale-orders/${id}/close/`, {}),
+  saleItems: () => apiList<SaleItem>("/sale-items/"),
+  saleItemCreate: (payload: Record<string, unknown>) => apiPost<SaleItem>("/sale-items/", payload),
+  saleStock: (collectionCenterId: string, materialId: string) =>
+    apiGet<{ collection_center_name: string; material_name: string; available_kg: string }>(
+      `/sale-stock/?collection_center_id=${encodeURIComponent(collectionCenterId)}&material_id=${encodeURIComponent(materialId)}`,
+    ),
+  collectionTrips: () => apiList<CollectionTrip>("/collection-trips/"),
+  collectionTripCreate: (payload: Record<string, unknown>) => apiPost<CollectionTrip>("/collection-trips/", payload),
+  collectionTripDepart: (id: string, payload: Record<string, unknown> = {}) => apiPost<CollectionTrip>(`/collection-trips/${id}/depart/`, payload),
+  collectionTripArrive: (id: string, payload: Record<string, unknown> = {}) => apiPost<CollectionTrip>(`/collection-trips/${id}/arrive/`, payload),
+  collectionTripClose: (id: string, payload: Record<string, unknown> = {}) => apiPost<CollectionTrip>(`/collection-trips/${id}/close/`, payload),
+  collectionTripStopCreate: (tripId: string, formData: FormData) => apiPostFormData<CollectionTripStop>(`/collection-trips/${tripId}/stops/`, formData),
+  collectionTripStops: (tripId?: string) => apiList<CollectionTripStop>(tripId ? `/collection-trip-stops/?trip=${encodeURIComponent(tripId)}` : "/collection-trip-stops/"),
+  collectionTripIncidents: (tripId?: string) =>
+    apiList<CollectionTripIncident>(tripId ? `/collection-trip-incidents/?trip=${encodeURIComponent(tripId)}` : "/collection-trip-incidents/"),
+  collectionTripIncidentCreate: (formData: FormData) => apiPostFormData<CollectionTripIncident>("/collection-trip-incidents/", formData),
+  collectionTripIncidentResolve: (id: string, payload: Record<string, unknown> = {}) =>
+    apiPost<CollectionTripIncident>(`/collection-trip-incidents/${id}/resolve/`, payload),
+  collectionTripTelemetryPoints: (tripId?: string) =>
+    apiList<CollectionTripTelemetryPoint>(tripId ? `/collection-trip-telemetry-points/?trip=${encodeURIComponent(tripId)}` : "/collection-trip-telemetry-points/"),
+  collectionTripTelemetryPointCreate: (formData: FormData) => apiPostFormData<CollectionTripTelemetryPoint>("/collection-trip-telemetry-points/", formData),
+  priceSuggestion: (collectionCenterId: string, materialId: string) =>
+    apiGet<PriceSuggestion>(
+      `/price-suggestion/?collection_center_id=${encodeURIComponent(collectionCenterId)}&material_id=${encodeURIComponent(materialId)}`,
+    ),
+  deviceSimulateScale: (deviceId: string) => apiGet<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; captured_at: string }>(`/devices/${deviceId}/simulate_scale/`),
+  evidenceFiles: () => apiList<EvidenceFile>("/evidence-files/"),
+  evidenceFileUpload: (formData: FormData) => apiPostFormData<EvidenceFile>("/evidence-files/", formData),
+  reportBasic: () => apiGet<Record<string, unknown>>("/reports/basic/"),
+};

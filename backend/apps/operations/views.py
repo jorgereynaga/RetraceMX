@@ -1,0 +1,155 @@
+from rest_framework import decorators, response, status, viewsets
+from django.shortcuts import get_object_or_404
+
+from apps.auditing.services import register_audit_event
+from apps.evidence.services import register_print_event
+from apps.parties.models import CollectionCenter, Driver, PersonOrCompany, Vehicle
+
+from .models import PurchaseOperation, TicketItem
+from .serializers import PurchaseOperationSerializer, TicketItemSerializer, TicketItemWriteSerializer
+from .services import (
+    change_operation_status,
+    open_purchase_operation,
+    recalculate_operation_total,
+    register_ticket_item,
+    update_ticket_item,
+)
+
+
+class PurchaseOperationViewSet(viewsets.ModelViewSet):
+    queryset = PurchaseOperation.objects.select_related(
+        "collection_center",
+        "customer",
+        "route",
+        "vehicle",
+        "driver",
+        "opened_by",
+        "closed_by",
+    ).prefetch_related("items", "payments")
+    serializer_class = PurchaseOperationSerializer
+
+    @decorators.action(detail=False, methods=["post"])
+    def open(self, request):
+        operation = open_purchase_operation(
+            collection_center=get_object_or_404(CollectionCenter, pk=request.data["collection_center_id"]),
+            customer=get_object_or_404(PersonOrCompany, pk=request.data["customer_id"]),
+            opened_by=request.user,
+            route=None,
+            vehicle=Vehicle.objects.filter(pk=request.data.get("vehicle_id")).first() if request.data.get("vehicle_id") else None,
+            driver=Driver.objects.filter(pk=request.data.get("driver_id")).first() if request.data.get("driver_id") else None,
+            notes=request.data.get("notes", ""),
+        )
+        return response.Response(self.get_serializer(operation).data, status=status.HTTP_201_CREATED)
+
+    @decorators.action(detail=True, methods=["post"])
+    def recalculate(self, request, pk=None):
+        operation = self.get_object()
+        operation = recalculate_operation_total(operation)
+        return response.Response(self.get_serializer(operation).data)
+
+    @decorators.action(detail=True, methods=["post"])
+    def status_change(self, request, pk=None):
+        operation = self.get_object()
+        operation = change_operation_status(operation, request.data["status"], user=request.user, reason=request.data.get("reason", ""))
+        return response.Response(self.get_serializer(operation).data)
+
+    @decorators.action(detail=True, methods=["post"])
+    def print_ticket(self, request, pk=None):
+        operation = self.get_object()
+        log = register_print_event(
+            operation=operation,
+            printed_by=request.user,
+            printer_name=request.data.get("printer_name", ""),
+            copies=int(request.data.get("copies", 1)),
+            is_reprint=bool(request.data.get("is_reprint", False)),
+            payload=request.data.get("payload", {"operation_id": str(operation.pk), "folio": operation.folio}),
+            notes=request.data.get("notes", ""),
+        )
+        operation.print_status = operation.PrintStatus.REPRINTED if log.is_reprint else operation.PrintStatus.PRINTED
+        operation.save(update_fields=["print_status", "updated_at"])
+        register_audit_event(actor=request.user, action="print_ticket", entity=operation, details={"print_log_id": str(log.pk), "is_reprint": log.is_reprint})
+        return response.Response({"operation": self.get_serializer(operation).data, "print_log": log.pk}, status=status.HTTP_201_CREATED)
+
+
+class TicketItemViewSet(viewsets.ModelViewSet):
+    queryset = TicketItem.objects.select_related("operation", "material", "weighing_session", "scale_reading")
+    serializer_class = TicketItemSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = TicketItemWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = register_ticket_item(
+            operation=serializer.validated_data["operation"],
+            material=serializer.validated_data["material"],
+            method=serializer.validated_data["method"],
+            unit_price=serializer.validated_data["unit_price"],
+            gross_weight_kg=serializer.validated_data["gross_weight_kg"],
+            tare_weight_kg=serializer.validated_data.get("tare_weight_kg", 0),
+            merma_kg=serializer.validated_data.get("merma_kg", 0),
+            net_weight_kg=serializer.validated_data.get("net_weight_kg"),
+            weighing_session=serializer.validated_data.get("weighing_session"),
+            scale_reading=serializer.validated_data.get("scale_reading"),
+            user=self.request.user,
+            notes=serializer.validated_data.get("notes", ""),
+        )
+        output = self.get_serializer(item)
+        return response.Response(output.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        item = self.get_object()
+        if item.operation.print_status != item.operation.PrintStatus.PENDING:
+            return response.Response(
+                {"detail": "La partida ya fue impresa. Usa el ajuste posterior."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = TicketItemWriteSerializer(data=request.data, partial=kwargs.pop("partial", False))
+        serializer.is_valid(raise_exception=True)
+        updated = update_ticket_item(
+            ticket_item=item,
+            user=request.user,
+            material=serializer.validated_data.get("material"),
+            method=serializer.validated_data.get("method"),
+            unit_price=serializer.validated_data.get("unit_price"),
+            gross_weight_kg=serializer.validated_data.get("gross_weight_kg"),
+            tare_weight_kg=serializer.validated_data.get("tare_weight_kg"),
+            merma_kg=serializer.validated_data.get("merma_kg"),
+            notes=serializer.validated_data.get("notes"),
+            reason=serializer.validated_data.get("reason", ""),
+            after_print=False,
+        )
+        return response.Response(self.get_serializer(updated).data)
+
+    @decorators.action(detail=True, methods=["post"])
+    def adjust(self, request, pk=None):
+        item = self.get_object()
+        serializer = TicketItemWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated = update_ticket_item(
+            ticket_item=item,
+            user=request.user,
+            material=serializer.validated_data.get("material"),
+            method=serializer.validated_data.get("method"),
+            unit_price=serializer.validated_data.get("unit_price"),
+            gross_weight_kg=serializer.validated_data.get("gross_weight_kg"),
+            tare_weight_kg=serializer.validated_data.get("tare_weight_kg"),
+            merma_kg=serializer.validated_data.get("merma_kg"),
+            notes=serializer.validated_data.get("notes"),
+            reason=serializer.validated_data.get("reason", request.data.get("reason", "")),
+            after_print=True,
+        )
+        return response.Response(self.get_serializer(updated).data)
+
+    @decorators.action(detail=True, methods=["post"])
+    def confirm(self, request, pk=None):
+        item = self.get_object()
+        was_confirmed = item.status == TicketItem.Status.CONFIRMED
+        item.status = TicketItem.Status.CONFIRMED
+        item.confirmed_by = request.user
+        item.save(update_fields=["status", "confirmed_by", "updated_at"])
+        register_audit_event(actor=request.user, action="confirm_ticket_item", entity=item, details={"manual": True})
+        if not was_confirmed and not item.inventory_movements.exists():
+            from apps.inventory.services import create_inventory_movement
+
+            create_inventory_movement(ticket_item=item, user=request.user)
+        recalculate_operation_total(item.operation)
+        return response.Response(self.get_serializer(item).data)

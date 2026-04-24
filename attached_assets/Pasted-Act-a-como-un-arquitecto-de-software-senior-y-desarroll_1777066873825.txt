@@ -1,0 +1,147 @@
+Actúa como un arquitecto de software senior y desarrollador full-stack experto en sistemas operativos para recicladoras, integración con básculas por USB, impresión térmica POS, control de caja e inventario.
+
+Contexto del proyecto:
+Se desarrollará un sistema para una empresa recicladora que compra materiales reciclables a proveedores o público en general. La empresa recolecta, transporta, acopia y comercializa materiales, pero no transforma materiales y no opera residuos peligrosos como línea principal. El sistema debe sustituir un software anterior, pero no debe copiar su interfaz. Debe conservar la lógica de negocio útil y rediseñar por completo la experiencia de usuario, la arquitectura y los controles.
+
+Objetivo:
+Construir la base funcional y técnica de una plataforma de gestión operativa para recicladora con flujo de compra, pesaje, ticket térmico, caja, inventario, auditoría y reportes.
+
+Instrucción general:
+Analiza el proyecto como si fueras a implementarlo de forma real en producción. No des una respuesta genérica. Debes proponer arquitectura, estructura de código, modelo de datos, módulos, flujos, endpoints, servicios, pantallas y estrategia de integración con dispositivos. Si hace falta tomar decisiones técnicas, declara los supuestos y elige opciones razonables, priorizando mantenibilidad, trazabilidad y operación local estable.
+
+Requerimientos del negocio:
+1. El sistema debe manejar personas o empresas que entregan material.
+2. Una misma entidad puede tener rol de proveedor, cliente comprador o ambos.
+3. Debe haber centros de acopio.
+4. El flujo principal es una operación de compra.
+5. Una operación puede contener uno o varios materiales.
+6. Existen dos básculas:
+   - Báscula vehicular conectada por USB.
+   - Báscula secundaria para materiales pequeños conectada por USB.
+7. La báscula vehicular se usa así:
+   - Ingresa el vehículo con carga y se pesa.
+   - Se descarga un material.
+   - Se vuelve a pesar el vehículo.
+   - El peso del material = peso anterior - peso actual.
+   - Si hay más materiales, el proceso se repite.
+8. La báscula secundaria se usa para materiales pequeños o que no se pesan con vehículo.
+9. Debe existir merma por partida.
+10. Debe generarse un ticket por operación con:
+   - encabezado,
+   - datos del proveedor,
+   - placas,
+   - conductor,
+   - fecha y hora,
+   - detalle de materiales,
+   - peso,
+   - merma,
+   - precio,
+   - importe,
+   - total,
+   - forma de pago.
+11. Debe imprimirse en impresora térmica Epson de tickets.
+12. Debe existir registro de pago en caja.
+13. Todo material confirmado debe ingresar al inventario del centro de acopio.
+14. Debe existir historial, estados de operación y auditoría.
+15. Debe existir control de usuarios y roles.
+16. Debe contemplarse operación multiestación o arquitectura centralizada local.
+17. El sistema debe trabajar solo con lógica federal general y operativa, sin separar por entidad federativa.
+
+Información útil observada del sistema anterior que sí debe aprovecharse como lógica de negocio:
+- La entidad central es la operación o ticket, no el pesaje aislado.
+- Una operación puede tener varias partidas.
+- Hay estados como pendiente y registrado.
+- Existe merma editable.
+- Existe impresión de ticket.
+- Existe registro de pago.
+- Existe historial de movimientos.
+- Existe catálogo de proveedores/clientes, materiales y usuarios.
+- Hay indicios de arquitectura cliente-servidor.
+No copies la interfaz anterior. Solo conserva la lógica que sea útil.
+
+Inventario y catálogo:
+Existe un catálogo actual de materiales con códigos internos. Diseña el sistema para soportar:
+- código interno,
+- nombre,
+- familia,
+- subfamilia,
+- método de pesaje permitido,
+- revisión especial opcional,
+- precio vigente,
+- estatus.
+
+Módulos obligatorios:
+1. Autenticación y usuarios
+2. Roles y permisos
+3. Personas/empresas con roles comerciales
+4. Vehículos y conductores
+5. Centros de acopio
+6. Materiales
+7. Lista de precios
+8. Configuración de básculas e impresoras
+9. Apertura de operación de compra
+10. Pesaje vehicular diferencial
+11. Pesaje individual
+12. Partidas del ticket
+13. Cálculo económico
+14. Estados de operación
+15. Impresión de ticket térmico
+16. Caja y pagos
+17. Inventario
+18. Historial y consultas
+19. Auditoría
+20. Reportes
+
+Requerimientos técnicos:
+1. Propón un stack moderno, mantenible y apropiado para operación local o red interna.
+2. Diseña una arquitectura clara separando frontend, backend, base de datos e integración con dispositivos.
+3. Propón una estrategia de integración con las básculas por USB.
+4. Propón una estrategia de impresión térmica para Epson POS.
+5. Define entidades, relaciones y reglas de negocio.
+6. Diseña el flujo de estados de una operación.
+7. Incluye bitácora de auditoría para acciones sensibles.
+8. Considera manejo de errores y contingencias:
+   - báscula desconectada,
+   - lectura inestable,
+   - captura manual de peso,
+   - impresora no disponible,
+   - reimpresión,
+   - anulación de operación,
+   - modificación de merma o material.
+9. Propón validaciones funcionales.
+10. Propón criterios de aceptación para el MVP.
+
+Entregables esperados:
+1. Resumen ejecutivo de la solución.
+2. Arquitectura propuesta.
+3. Stack tecnológico recomendado con justificación.
+4. Modelo de datos inicial con tablas principales, campos clave y relaciones.
+5. Reglas de negocio detalladas.
+6. Flujo completo del proceso principal.
+7. Diseño de módulos y submódulos.
+8. Diseño de API o servicios principales.
+9. Diseño de pantallas principales.
+10. Estrategia de integración con básculas por USB.
+11. Estrategia de impresión térmica.
+12. Estrategia de auditoría y seguridad.
+13. Plan de desarrollo por fases.
+14. Alcance del MVP.
+15. Riesgos técnicos y mitigaciones.
+16. Estructura inicial del repositorio.
+17. Lista de tareas técnicas priorizadas para comenzar a desarrollar.
+18. Si lo consideras conveniente, genera el esqueleto inicial del proyecto y archivos base.
+
+Requerimientos de calidad:
+- No inventes dependencias innecesarias.
+- Prioriza simplicidad operativa y trazabilidad.
+- Usa nombres claros y consistentes.
+- Separa bien lógica de dominio, infraestructura e interfaz.
+- Evita acoplar la lógica de pesaje a la interfaz gráfica.
+- Diseña para soportar futuras ampliaciones sin rehacer el núcleo.
+- Incluye pruebas para la lógica crítica de cálculo de pesos, mermas, importes y estados.
+- Incluye tipos, validaciones y manejo de errores.
+- Incluye comentarios útiles en el código, no relleno.
+- Si propones supuestos, decláralos explícitamente.
+
+Instrucción final:
+Quiero que primero entregues la propuesta técnica completa y estructurada. Después, en una segunda sección, genera el plan de implementación inicial y el esqueleto técnico del proyecto. Si detectas vacíos críticos de información, enuméralos al final como “supuestos pendientes”, pero no detengas la propuesta.

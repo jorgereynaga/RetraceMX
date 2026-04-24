@@ -1,0 +1,67 @@
+modules = ["python-3.12", "nodejs-20"]
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[userenv]
+
+[userenv.shared]
+DJANGO_SECRET_KEY = "acopio360-dev-secret-key-replit-2026"
+DJANGO_DEBUG = "1"
+DJANGO_ALLOWED_HOSTS = "localhost,127.0.0.1,0.0.0.0,.replit.dev,.repl.co,.replit.app"
+DJANGO_CSRF_TRUSTED_ORIGINS = "https://*.replit.dev,https://*.repl.co,https://*.replit.app,http://localhost:3000"
+DJANGO_TIME_ZONE = "America/Mexico_City"
+DJANGO_DEFAULT_FROM_EMAIL = "acopio360@localhost"
+DJANGO_SUPERUSER_USERNAME = "admin"
+DJANGO_SUPERUSER_EMAIL = "admin@acopio360.local"
+DJANGO_SUPERUSER_PASSWORD = "Admin1234!"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Backend API"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Backend API"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd backend && python manage.py runserver 0.0.0.0:8000"
+waitForPort = 8000
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd frontend && npm run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 8000
+externalPort = 8000
