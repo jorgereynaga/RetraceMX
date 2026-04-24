@@ -115,4 +115,15 @@ export const api = {
   evidenceFiles: () => apiList<EvidenceFile>("/evidence-files/"),
   evidenceFileUpload: (formData: FormData) => apiPostFormData<EvidenceFile>("/evidence-files/", formData),
   reportBasic: () => apiGet<Record<string, unknown>>("/reports/basic/"),
+  reportDaily: (date?: string) =>
+    apiGet<{
+      date: string;
+      ops_count: number;
+      total_weight_kg: number;
+      total_merma_kg: number;
+      total_revenue: number;
+      by_family: Array<{ family_id: string; name: string; weight_kg: number; amount: number; items_count: number }>;
+      by_client: Array<{ client_id: string; name: string; ops_count: number; weight_kg: number; amount: number }>;
+      trend_7d: Array<{ date: string; label: string; revenue: number; weight_kg: number; ops_count: number }>;
+    }>(date ? `/reports/daily/?date=${date}` : "/reports/daily/"),
 };

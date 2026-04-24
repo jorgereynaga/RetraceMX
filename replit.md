@@ -75,10 +75,36 @@ Sistema de gestión operativa para empresa recicladora. Cubre el flujo completo 
 
 ## Datos de demo
 
-La base de datos ya tiene datos de ejemplo cargados con el comando `seed_demo`. Incluye materiales, centros de acopio, proveedores y configuración de básculas.
+La base de datos tiene datos de ejemplo cargados con `seed_demo`. Incluye:
+- 36 materiales en 7 familias (Metales Ferrosos, No Ferrosos, Plásticos, Papel y Cartón, Vidrio, Electrónicos, Otros)
+- 5 proveedores, 3 vehículos
+- 3 dispositivos: báscula vehicular (`bascula-vehicular-01`), báscula secundaria (`bascula-secundaria-01`), impresora (`impresora-epson-01`)
+- 1 lista de precios con todos los materiales
+
+## UI/UX
+
+- Diseño oscuro profesional con variables CSS en `frontend/src/styles.css`
+- Sidebar con navegación agrupada por sección (Catálogos, Operación, Comercial, Control)
+- Sistema de colores: accent verde `#22c55e`, amber `#f59e0b`, azul `#3b82f6`, peligro `#ef4444`
+- Tarjetas KPI con colores semánticos, tablas con cabeceras en mayúsculas, badges de estado
+
+## Módulo de pesaje
+
+- Página `WeighingPage.tsx` con simulador real conectado al endpoint `GET /api/devices/{id}/simulate_scale/`
+- Modo **Diferencial** (báscula vehicular): captura peso bruto → peso tara → calcula neto
+- Modo **Directo** (báscula de banco): lectura directa + tara opcional
+- Indicador de estabilidad animado, soporte a fallback manual
+
+## Dashboard diario
+
+- Endpoint `GET /api/reports/daily/?date=YYYY-MM-DD` en `backend/apps/reporting/views.py`
+- KPIs: operaciones, peso, merma, ingresos del día
+- Gráfico de barras por familia de material
+- Tendencia 7 días
+- Tabla de compras por cliente/proveedor
 
 ## Notas de integración con dispositivos
 
 - Básculas USB: módulo `apps/devices` con adaptadores, simuladores y servicios
 - Impresión térmica Epson POS: endpoint de impresión en `apps/evidence`
-- En desarrollo local, los pesos pueden capturarse manualmente si no hay báscula conectada
+- En desarrollo local, los pesos se capturan por simulación (`simulate_scale`) o entrada manual

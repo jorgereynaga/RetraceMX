@@ -18,7 +18,7 @@ from apps.payments.views import PaymentViewSet
 from apps.inventory.views import InventoryMovementViewSet
 from apps.evidence.views import EvidenceFileViewSet, CustodyEventViewSet, PrintLogViewSet
 from apps.auditing.views import AuditLogViewSet
-from apps.reporting.views import BasicReportView
+from apps.reporting.views import BasicReportView, DailyReportView
 
 router = DefaultRouter()
 router.register("users", UserViewSet)
@@ -56,6 +56,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/login/", LoginView.as_view(), name="auth-login"),
     path("api/reports/basic/", BasicReportView.as_view(), name="basic-report"),
+    path("api/reports/daily/", DailyReportView.as_view(), name="daily-report"),
     path("api/sale-stock/", SaleStockView.as_view(), name="sale-stock"),
     path("api/price-suggestion/", price_suggestion, name="price-suggestion"),
     path("api/", include(router.urls)),
