@@ -31,7 +31,7 @@ export function WeighingPage() {
   const [step, setStep] = useState<"gross" | "tare" | "done">("gross");
 
   useEffect(() => {
-    api.deviceList().then((devs) => {
+    api.devices().then((devs) => {
       const scales = devs.filter(
         (d) => d.kind === "vehicle_scale" || d.kind === "secondary_scale"
       );
