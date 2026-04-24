@@ -5,7 +5,19 @@ from .simulators import SimulatedScaleAdapter, SimulatedThermalPrinter
 
 
 def build_scale_simulator(device: Device):
-    return SimulatedScaleAdapter(device_identifier=device.identifier, kind=device.kind)
+    meta = device.metadata or {}
+    kwargs = dict(device_identifier=device.identifier, kind=device.kind)
+    if "min_weight" in meta:
+        from decimal import Decimal
+        kwargs["min_weight"] = Decimal(str(meta["min_weight"]))
+    if "max_weight" in meta:
+        from decimal import Decimal
+        kwargs["max_weight"] = Decimal(str(meta["max_weight"]))
+    if device.kind == Device.Kind.VEHICLE_SCALE and "min_weight" not in meta:
+        from decimal import Decimal
+        kwargs["min_weight"] = Decimal("3500")
+        kwargs["max_weight"] = Decimal("28000")
+    return SimulatedScaleAdapter(**kwargs)
 
 
 def build_printer_simulator(device: Device):
