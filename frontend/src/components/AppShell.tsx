@@ -25,10 +25,9 @@ const navSections: NavSection[] = [
   {
     label: "Operación",
     items: [
-      { to: "/operations", label: "Operaciones", icon: "📋" },
-      { to: "/weighing", label: "Pesaje", icon: "⚖️" },
-      { to: "/ticket", label: "Ticket / Partidas", icon: "🧾" },
+      { to: "/compra", label: "Compra de materiales", icon: "⚖️" },
       { to: "/cashier", label: "Caja y pagos", icon: "💰" },
+      { to: "/operations", label: "Historial de compras", icon: "📋" },
     ],
   },
   {
