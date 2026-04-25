@@ -167,9 +167,9 @@ export function PurchasePage() {
     setOpLoading(true); setOpError(null);
     try {
       const op = await api.operationCreate({
-        collection_center: centerId,
-        customer: customerId,
-        vehicle: vehicleId || null,
+        collection_center_id: centerId,
+        customer_id: customerId,
+        vehicle_id: vehicleId || null,
       });
       setOperation(op);
       setItems([]);
