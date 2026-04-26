@@ -63,6 +63,7 @@ export function PurchasePage() {
   const [manualTare, setManualTare] = useState("");
   const [diffStep, setDiffStep] = useState<"idle" | "gross" | "cycling">("idle");
   const [diffRefKg, setDiffRefKg] = useState("");
+  const [capturedTareKg, setCapturedTareKg] = useState("");
 
   const [liveReading, setLiveReading] = useState<LiveReading | null>(null);
   const [autoRead, setAutoRead] = useState(false);
@@ -159,10 +160,12 @@ export function PurchasePage() {
   const totalAmount = parseFloat(operation?.total_amount ?? "0") || 0;
 
   const refKgNum = parseFloat(diffRefKg) || 0;
+  const capturedTareNum = parseFloat(capturedTareKg) || 0;
   const liveNum = displayWeight ?? 0;
 
   const netRaw = (() => {
-    if (method === "vehicle_differential" && diffStep === "cycling") return Math.max(0, refKgNum - liveNum);
+    if (method === "vehicle_differential" && diffStep === "cycling" && capturedTareKg)
+      return Math.max(0, refKgNum - capturedTareNum);
     if (method === "manual_contingency") return Math.max(0, (parseFloat(manualGross) || 0) - (parseFloat(manualTare) || 0));
     if (method === "secondary_direct" && grossKg) return parseFloat(grossKg) || 0;
     return 0;
@@ -175,7 +178,8 @@ export function PurchasePage() {
   const hasScale = !!scaleDevice;
   const canReadScale = !!operation && hasScale && method !== "manual_contingency";
   const canCaptureGross = canReadScale && diffStep === "idle" && liveStable && !confirmed;
-  const canCaptureMaterial = canReadScale && diffStep === "cycling" && !!materialId && liveStable && !confirmed;
+  const canCaptureTare = canReadScale && diffStep === "cycling" && !!materialId && liveStable && !capturedTareKg && !confirmed;
+  const canAddItemDiff = !!operation && diffStep === "cycling" && !!materialId && !!capturedTareKg && netClean > 0 && !confirmed;
   const canCaptureDirect = canReadScale && method === "secondary_direct" && !!materialId && liveStable && !confirmed;
 
   const canAddItemManual = !!operation && !!materialId && method === "manual_contingency" && !!manualGross && netClean > 0 && !confirmed;
@@ -184,8 +188,21 @@ export function PurchasePage() {
   function captureGross() {
     if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable."); return; }
     setDiffRefKg(liveReading.weight_kg);
+    setCapturedTareKg("");
     setDiffStep("cycling");
     setItemMsg(`Peso inicial capturado: ${fmtKg(parseFloat(liveReading.weight_kg))} kg. Selecciona el material y captura la tara.`);
+  }
+
+  function captureTare() {
+    if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable para capturar la tara."); return; }
+    const tare = parseFloat(liveReading.weight_kg);
+    const ref = parseFloat(diffRefKg) || 0;
+    if (tare >= ref) {
+      setItemMsg(`La tara (${fmtKg(tare)} kg) no puede ser mayor o igual al peso de referencia (${fmtKg(ref)} kg). Verifica que el vehículo haya descargado el material.`);
+      return;
+    }
+    setCapturedTareKg(liveReading.weight_kg);
+    setItemMsg(null);
   }
 
   function captureDirectReading() {
@@ -239,27 +256,26 @@ export function PurchasePage() {
   }
 
   function resetWeigh() {
-    setGrossKg(""); setDiffRefKg(""); setManualGross(""); setManualTare("");
+    setGrossKg(""); setDiffRefKg(""); setCapturedTareKg(""); setManualGross(""); setManualTare("");
     setMermaKg(""); setDiffStep("idle"); setLiveReading(null); setAutoRead(false);
     setItemMsg(null);
   }
 
   function resetForNextMaterial() {
-    setMaterialId(""); setMermaKg("");
+    setMaterialId(""); setMermaKg(""); setCapturedTareKg("");
     setItemMsg("Partida registrada. Selecciona el siguiente material y captura la tara.");
   }
 
   async function addItemDiff() {
-    if (!operation || !canCaptureMaterial) return;
+    if (!operation || !canAddItemDiff) return;
     setItemLoading(true); setItemMsg(null);
     try {
-      const tare = liveReading!.weight_kg;
       const item = await api.createTicketItem({
         operation: operation.id,
         material: materialId,
         method,
         gross_weight_kg: diffRefKg,
-        tare_weight_kg: tare,
+        tare_weight_kg: capturedTareKg,
         merma_kg: mermaNum.toFixed(3),
         unit_price: unitPrice,
         notes: "",
@@ -267,7 +283,7 @@ export function PurchasePage() {
       setItems((prev) => [...prev, item]);
       const refreshed = await api.operationDetail(operation.id);
       setOperation(refreshed);
-      setDiffRefKg(tare);
+      setDiffRefKg(capturedTareKg);
       resetForNextMaterial();
     } catch (e) {
       setItemMsg(e instanceof Error ? e.message : "Error al guardar la partida.");
@@ -619,15 +635,25 @@ export function PurchasePage() {
                           </button>
                         )}
 
-                        {method === "vehicle_differential" && diffStep === "cycling" && (
+                        {method === "vehicle_differential" && diffStep === "cycling" && !capturedTareKg && (
                           <button
                             className="btn-primary"
                             style={{ flex: 1 }}
-                            disabled={!canCaptureMaterial || itemLoading}
-                            onClick={addItemDiff}
-                            title="Captura la tara del vehículo tras descargar el material y registra la partida"
+                            disabled={!canCaptureTare}
+                            onClick={captureTare}
+                            title="Captura la tara cuando el vehículo haya descargado el material"
                           >
-                            {itemLoading ? "Guardando…" : "⬇ Tara + agregar partida"}
+                            ⬇ Capturar tara
+                          </button>
+                        )}
+                        {method === "vehicle_differential" && diffStep === "cycling" && capturedTareKg && (
+                          <button
+                            className="btn-primary"
+                            style={{ flex: 1 }}
+                            disabled={!canAddItemDiff || itemLoading}
+                            onClick={addItemDiff}
+                          >
+                            {itemLoading ? "Guardando…" : "+ Agregar partida"}
                           </button>
                         )}
 
@@ -666,30 +692,33 @@ export function PurchasePage() {
                   {diffStep === "cycling" && (
                     <div style={{
                       padding: "10px 14px", borderRadius: "var(--radius-sm)",
-                      background: "var(--accent-dim)",
-                      border: "1px solid rgba(34,197,94,0.3)",
+                      background: capturedTareKg ? "rgba(34,197,94,0.06)" : "var(--accent-dim)",
+                      border: `1px solid ${capturedTareKg ? "rgba(34,197,94,0.3)" : "rgba(34,197,94,0.2)"}`,
                     }}>
                       <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                        Paso 2 — Tara de material actual
+                        Paso 2 — Tara y registro del material
                       </div>
-                      <div style={{ fontSize: "0.82rem", color: "var(--muted)", marginTop: 4 }}>
-                        Referencia: <strong style={{ color: "var(--text)" }}>{fmtKg(refKgNum)} kg</strong>
-                        {displayWeight != null && (
-                          <span style={{ marginLeft: 12 }}>
-                            Actual: <strong style={{ color: liveStable ? "var(--accent)" : "var(--warning)" }}>
-                              {fmtKg(displayWeight)} kg
-                            </strong>
-                          </span>
-                        )}
+                      <div style={{ fontSize: "0.82rem", color: "var(--muted)", marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                        <span>Ref: <strong style={{ color: "var(--text)" }}>{fmtKg(refKgNum)} kg</strong></span>
+                        {capturedTareKg ? (
+                          <span>Tara capturada: <strong style={{ color: "var(--accent)" }}>{fmtKg(capturedTareNum)} kg</strong></span>
+                        ) : displayWeight != null ? (
+                          <span>En báscula: <strong style={{ color: liveStable ? "var(--text-soft)" : "var(--warning)" }}>
+                            {fmtKg(displayWeight)} kg {liveStable ? "" : "(oscilando)"}
+                          </strong></span>
+                        ) : null}
                       </div>
-                      {displayWeight != null && diffRefKg && (
-                        <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--accent)", marginTop: 4 }}>
-                          Neto estimado: {fmtKg(Math.max(0, refKgNum - displayWeight))} kg
-                          {materialId && priceNum > 0 && (
-                            <span style={{ color: "var(--accent-2)", marginLeft: 12 }}>
-                              ≈ {fmtMXN(Math.max(0, refKgNum - displayWeight - (Math.max(0, refKgNum - displayWeight) * MERMA_PCT)) * priceNum)}
-                            </span>
-                          )}
+                      {capturedTareKg && netClean > 0 && (
+                        <div style={{ marginTop: 8, display: "flex", gap: 16, alignItems: "baseline" }}>
+                          <span style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--accent)" }}>{fmtKg(netClean)} kg neto</span>
+                          {priceNum > 0 && <span style={{ color: "var(--accent-2)", fontWeight: 600 }}>{fmtMXN(estimatedAmount)}</span>}
+                          <button
+                            className="btn-ghost"
+                            style={{ fontSize: "0.72rem", padding: "2px 8px" }}
+                            onClick={() => { setCapturedTareKg(""); setItemMsg(null); }}
+                          >
+                            ↺ Recapturar
+                          </button>
                         </div>
                       )}
                       {!materialId && (
@@ -697,12 +726,17 @@ export function PurchasePage() {
                           Selecciona el material antes de capturar la tara.
                         </div>
                       )}
+                      {!capturedTareKg && materialId && (
+                        <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 6 }}>
+                          Cuando el vehículo haya descargado el material, presiona <strong>⬇ Capturar tara</strong>.
+                        </div>
+                      )}
                       <button
                         className="btn-ghost"
                         style={{ marginTop: 8, fontSize: "0.75rem" }}
-                        onClick={() => { setDiffStep("idle"); setDiffRefKg(""); setMaterialId(""); setMermaKg(""); setItemMsg(null); }}
+                        onClick={() => { setDiffStep("idle"); setDiffRefKg(""); setCapturedTareKg(""); setMaterialId(""); setMermaKg(""); setItemMsg(null); }}
                       >
-                        ↺ Reiniciar ciclo
+                        ↺ Reiniciar ciclo completo
                       </button>
                     </div>
                   )}
