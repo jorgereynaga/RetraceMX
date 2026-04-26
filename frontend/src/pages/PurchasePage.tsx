@@ -1159,13 +1159,19 @@ export function PurchasePage() {
                       <th>Material</th>
                       <th>Método</th>
                       <th>Neto (kg)</th>
+                      <th>Merma</th>
                       <th>Precio</th>
                       <th>Importe</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item) => (
+                    {items.map((item) => {
+                      const mermaKgVal = parseFloat(item.merma_kg) || 0;
+                      const netKgVal = parseFloat(item.net_weight_kg) || 0;
+                      const cleanKg = netKgVal + mermaKgVal;
+                      const mermaPct = cleanKg > 0 ? (mermaKgVal / cleanKg) * 100 : 0;
+                      return (
                       <tr key={item.id}>
                         <td style={{ fontWeight: 500 }}>{materialById.get(item.material)?.name ?? item.material}</td>
                         <td>
@@ -1173,7 +1179,15 @@ export function PurchasePage() {
                             {item.method === "vehicle_differential" ? "Diferencial" : item.method === "secondary_direct" ? "Directo" : "Manual"}
                           </span>
                         </td>
-                        <td style={{ fontVariantNumeric: "tabular-nums" }}>{fmtKg(parseFloat(item.net_weight_kg))}</td>
+                        <td style={{ fontVariantNumeric: "tabular-nums" }}>{fmtKg(netKgVal)}</td>
+                        <td style={{ fontVariantNumeric: "tabular-nums", color: mermaKgVal > 0 ? "var(--warning, #f59e0b)" : "var(--muted)" }}>
+                          {mermaKgVal > 0 ? (
+                            <>
+                              <span>{fmtKg(mermaKgVal)}</span>
+                              <span style={{ fontSize: "0.72rem", marginLeft: 4, opacity: 0.75 }}>({mermaPct.toFixed(1)}%)</span>
+                            </>
+                          ) : <span>—</span>}
+                        </td>
                         <td style={{ color: "var(--muted)" }}>{fmtMXN(parseFloat(item.unit_price))}</td>
                         <td style={{ fontWeight: 700, color: "var(--accent-2)" }}>{fmtMXN(parseFloat(item.amount))}</td>
                         <td style={{ whiteSpace: "nowrap" }}>
@@ -1187,7 +1201,7 @@ export function PurchasePage() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
                 <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", background: "var(--panel-2)" }}>
@@ -1219,7 +1233,25 @@ export function PurchasePage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   <label>Peso bruto (kg)<input type="number" value={editState.grossKg} onChange={(e) => setEditState((s) => s && ({ ...s, grossKg: e.target.value }))} /></label>
                   <label>Peso tara (kg)<input type="number" value={editState.tareKg} onChange={(e) => setEditState((s) => s && ({ ...s, tareKg: e.target.value }))} /></label>
-                  <label>Merma (kg)<input type="number" value={editState.mermaKg} onChange={(e) => setEditState((s) => s && ({ ...s, mermaKg: e.target.value }))} /></label>
+                  <label>
+                    Merma (kg)
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="number" value={editState.mermaKg} min={0} step={0.001}
+                        onChange={(e) => setEditState((s) => s && ({ ...s, mermaKg: e.target.value }))}
+                        style={{ flex: 1 }} />
+                      {(() => {
+                        const m = parseFloat(editState.mermaKg) || 0;
+                        const gross = parseFloat(editState.grossKg) || 0;
+                        const tare = parseFloat(editState.tareKg) || 0;
+                        const clean = gross - tare;
+                        return clean > 0 && m > 0
+                          ? <span style={{ fontSize: "0.78rem", color: "var(--warning, #f59e0b)", whiteSpace: "nowrap" }}>
+                              {((m / clean) * 100).toFixed(1)}%
+                            </span>
+                          : null;
+                      })()}
+                    </div>
+                  </label>
                   <label>Precio ($/kg)<input type="number" value={editState.unitPrice} onChange={(e) => setEditState((s) => s && ({ ...s, unitPrice: e.target.value }))} /></label>
                 </div>
                 {itemMsg && itemMsg.toLowerCase().includes("error") && (
