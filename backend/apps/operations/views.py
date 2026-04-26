@@ -41,6 +41,37 @@ class PurchaseOperationViewSet(viewsets.ModelViewSet):
         )
         return response.Response(self.get_serializer(operation).data, status=status.HTTP_201_CREATED)
 
+    @decorators.action(detail=True, methods=["patch"])
+    def update_driver(self, request, pk=None):
+        operation = self.get_object()
+        closed_statuses = {
+            PurchaseOperation.Status.CONFIRMED,
+            PurchaseOperation.Status.COMPLETED,
+            PurchaseOperation.Status.CANCELLED,
+        }
+        if operation.status in closed_statuses:
+            return response.Response(
+                {"detail": "No se puede cambiar el conductor en una operación cerrada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        driver_id = request.data.get("driver_id")
+        if driver_id:
+            driver = Driver.objects.filter(pk=driver_id).first()
+            if not driver:
+                return response.Response({"detail": "Conductor no encontrado."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            driver = None
+        old_driver = str(operation.driver) if operation.driver else None
+        operation.driver = driver
+        operation.save(update_fields=["driver", "updated_at"])
+        register_audit_event(
+            actor=request.user,
+            action="update_driver",
+            entity=operation,
+            details={"old_driver": old_driver, "new_driver": str(driver) if driver else None},
+        )
+        return response.Response(self.get_serializer(operation).data)
+
     @decorators.action(detail=True, methods=["post"])
     def recalculate(self, request, pk=None):
         operation = self.get_object()

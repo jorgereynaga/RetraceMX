@@ -72,6 +72,8 @@ export const api = {
   operationCreate: (payload: Record<string, unknown>) => apiPost<PurchaseOperation>("/purchase-operations/open/", payload),
   operationStatusChange: (id: string, status: string, reason = "") =>
     apiPost<PurchaseOperation>(`/purchase-operations/${id}/status_change/`, { status, reason }),
+  operationUpdateDriver: (id: string, driverId: string | null) =>
+    apiPatch<PurchaseOperation>(`/purchase-operations/${id}/update_driver/`, { driver_id: driverId || null }),
   operationPrint: (id: string, payload: Record<string, unknown>) => apiPost<Record<string, unknown>>(`/purchase-operations/${id}/print_ticket/`, payload),
   ticketItems: () => apiList<TicketItem>("/ticket-items/"),
   ticketItemsByOperation: (operationId: string) => apiListAll<TicketItem>(`/ticket-items/?operation=${encodeURIComponent(operationId)}`),

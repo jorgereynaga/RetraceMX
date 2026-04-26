@@ -78,6 +78,11 @@ export function PurchasePage() {
 
   const [editState, setEditState] = useState<EditState | null>(null);
 
+  const [editingDriver, setEditingDriver] = useState(false);
+  const [editDriverId, setEditDriverId] = useState("");
+  const [driverUpdateLoading, setDriverUpdateLoading] = useState(false);
+  const [driverUpdateError, setDriverUpdateError] = useState<string | null>(null);
+
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
@@ -495,6 +500,7 @@ export function PurchasePage() {
     setCenterId(op.collection_center);
     setCustomerId(op.customer);
     setDriverId(op.driver ?? "");
+    setEditingDriver(false); setEditDriverId(""); setDriverUpdateError(null);
     setItems([]);
     try {
       const opItems = await api.ticketItemsByOperation(op.id);
@@ -510,7 +516,26 @@ export function PurchasePage() {
     resetWeigh();
     setMaterialId(""); setFamilyFilter("");
     setEditState(null);
+    setEditingDriver(false); setEditDriverId(""); setDriverUpdateError(null);
     loadTodayOps();
+  }
+
+  async function saveDriver() {
+    if (!operation) return;
+    setDriverUpdateLoading(true);
+    setDriverUpdateError(null);
+    try {
+      const updated = await api.operationUpdateDriver(operation.id, editDriverId || null);
+      setOperation(updated);
+      setTodayOps((prev) => prev.map((op) => (op.id === updated.id ? updated : op)));
+      setEditingDriver(false);
+      setEditDriverId("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al actualizar el conductor";
+      setDriverUpdateError(msg);
+    } finally {
+      setDriverUpdateLoading(false);
+    }
   }
 
   const operationVehicle = useMemo(() => {
@@ -799,18 +824,81 @@ export function PurchasePage() {
                 )}
               </label>
 
-              <label>
-                Conductor (opcional)
-                <select value={driverId} onChange={(e) => setDriverId(e.target.value)} disabled={!!operation}>
-                  <option value="">— Sin conductor asignado —</option>
-                  {drivers.filter((d) => d.is_active !== false).map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.person_name ?? d.license_number ?? d.id}
-                      {d.person_name && d.license_number ? ` (Lic: ${d.license_number})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {!operation ? (
+                <label>
+                  Conductor (opcional)
+                  <select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+                    <option value="">— Sin conductor asignado —</option>
+                    {drivers.filter((d) => d.is_active !== false).map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.person_name ?? d.license_number ?? d.id}
+                        {d.person_name && d.license_number ? ` (Lic: ${d.license_number})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div>
+                  <div style={{ fontSize: "0.78rem", color: "var(--muted)", marginBottom: 4 }}>Conductor</div>
+                  {editingDriver ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <select
+                        value={editDriverId}
+                        onChange={(e) => setEditDriverId(e.target.value)}
+                        disabled={driverUpdateLoading}
+                      >
+                        <option value="">— Sin conductor asignado —</option>
+                        {drivers.filter((d) => d.is_active !== false).map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.person_name ?? d.license_number ?? d.id}
+                            {d.person_name && d.license_number ? ` (Lic: ${d.license_number})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {driverUpdateError && (
+                        <div style={{ fontSize: "0.75rem", color: "var(--danger)" }}>{driverUpdateError}</div>
+                      )}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          className="btn-primary"
+                          style={{ fontSize: "0.78rem", padding: "4px 12px" }}
+                          onClick={saveDriver}
+                          disabled={driverUpdateLoading}
+                        >
+                          {driverUpdateLoading ? "Guardando…" : "Guardar"}
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          style={{ fontSize: "0.78rem", padding: "4px 10px" }}
+                          onClick={() => { setEditingDriver(false); setEditDriverId(""); setDriverUpdateError(null); }}
+                          disabled={driverUpdateLoading}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontWeight: 500, fontSize: "0.88rem" }}>
+                        {operation.driver_name ?? <span style={{ color: "var(--muted)" }}>Sin conductor asignado</span>}
+                      </span>
+                      {!confirmed && (
+                        <button
+                          className="btn-ghost"
+                          style={{ fontSize: "0.72rem", padding: "2px 8px" }}
+                          onClick={() => {
+                            setEditDriverId(operation.driver ?? "");
+                            setEditingDriver(true);
+                            setDriverUpdateError(null);
+                          }}
+                        >
+                          ✏ Cambiar
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {opError && <div className="error-banner">{opError}</div>}
               {!operation ? (
