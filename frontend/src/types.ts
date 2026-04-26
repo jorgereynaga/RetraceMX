@@ -144,6 +144,20 @@ export type ScaleReading = {
   captured_at?: string;
 };
 
+export type WeighingSession = {
+  id: string;
+  kind: "vehicle" | "secondary";
+  status: string;
+  vehicle?: string | null;
+  operation?: string | null;
+  operation_folio?: string | null;
+  collection_center: string;
+  device: string;
+  started_at: string;
+  ended_at?: string | null;
+  readings: ScaleReading[];
+};
+
 export type PriceSuggestion = {
   found: boolean;
   collection_center_id: string;

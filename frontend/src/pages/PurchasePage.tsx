@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
 import { TicketViewer } from "../components/TicketViewer";
-import type { CollectionCenter, Device, Material, MaterialFamily, Party, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle } from "../types";
+import type { CollectionCenter, Device, Material, MaterialFamily, Party, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle, WeighingSession } from "../types";
 
 type LiveReading = {
   weight_kg: string;
@@ -83,6 +83,9 @@ export function PurchasePage() {
   const [opsLoading, setOpsLoading] = useState(false);
   const [opsPage, setOpsPage] = useState(0);
   const OPS_PAGE_SIZE = 2;
+
+  const [vehicleHistory, setVehicleHistory] = useState<WeighingSession[]>([]);
+  const [vehicleHistoryLoading, setVehicleHistoryLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -499,6 +502,30 @@ export function PurchasePage() {
     return vehicleById.get(operation.vehicle) ?? null;
   }, [operation, vehicleById]);
 
+  const selectedVehicleId = useMemo(() => {
+    if (operation?.vehicle) return operation.vehicle;
+    const plate = plateInput.trim().toUpperCase();
+    if (!plate) return null;
+    const found = [...allVehicles, ...customerVehicles].find(
+      (v) => v.plate_number.toUpperCase() === plate
+    );
+    return found?.id ?? null;
+  }, [operation, plateInput, allVehicles, customerVehicles]);
+
+  useEffect(() => {
+    if (!selectedVehicleId) { setVehicleHistory([]); return; }
+    setVehicleHistoryLoading(true);
+    api.weighingSessionsByVehicle(selectedVehicleId)
+      .then((sessions) => {
+        const sorted = [...sessions].sort(
+          (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+        );
+        setVehicleHistory(sorted.slice(0, 5));
+      })
+      .catch(() => setVehicleHistory([]))
+      .finally(() => setVehicleHistoryLoading(false));
+  }, [selectedVehicleId]);
+
   const operationCustomer = useMemo(() => {
     if (!operation?.customer) return null;
     return partyById.get(operation.customer) ?? null;
@@ -740,6 +767,74 @@ export function PurchasePage() {
               )}
             </div>
           </div>
+
+          {/* Vehicle weighing history */}
+          {selectedVehicleId && (
+            <div className="section-panel">
+              <div className="section-panel-header">
+                <h3>Historial de pesajes del vehículo</h3>
+                {vehicleHistoryLoading
+                  ? <span className="muted" style={{ fontSize: "0.78rem" }}>Cargando…</span>
+                  : <span className="badge badge-gray">{vehicleHistory.length} sesión{vehicleHistory.length !== 1 ? "es" : ""}</span>
+                }
+              </div>
+              {vehicleHistory.length === 0 && !vehicleHistoryLoading ? (
+                <div style={{ padding: "12px 20px", color: "var(--muted)", fontSize: "0.82rem" }}>
+                  Sin sesiones de pesaje previas para este vehículo.
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="table" style={{ fontSize: "0.8rem" }}>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Folio op.</th>
+                        <th>Bruto (kg)</th>
+                        <th>Tara (kg)</th>
+                        <th>Neto (kg)</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vehicleHistory.map((session) => {
+                        const grossReading = session.readings.find((r) => r.reading_type === "gross");
+                        const tareReading = session.readings.find((r) => r.reading_type === "tare");
+                        const grossKgVal = parseFloat(grossReading?.gross_weight_kg ?? "0") || 0;
+                        const tareKgVal = parseFloat(tareReading?.tare_weight_kg ?? "0") || 0;
+                        const netKgVal = grossKgVal > 0 && tareKgVal > 0 ? Math.max(0, grossKgVal - tareKgVal) : null;
+                        const dateStr = new Date(session.started_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" });
+                        const timeStr = new Date(session.started_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+                        return (
+                          <tr key={session.id}>
+                            <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                              {dateStr} {timeStr}
+                            </td>
+                            <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                              {session.operation_folio ?? "—"}
+                            </td>
+                            <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                              {grossKgVal > 0 ? fmtKg(grossKgVal) : "—"}
+                            </td>
+                            <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                              {tareKgVal > 0 ? fmtKg(tareKgVal) : "—"}
+                            </td>
+                            <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: netKgVal !== null ? 600 : undefined }}>
+                              {netKgVal !== null ? fmtKg(netKgVal) : "—"}
+                            </td>
+                            <td>
+                              <span className={`badge ${session.status === "open" ? "badge-amber" : "badge-green"}`} style={{ fontSize: "0.68rem" }}>
+                                {session.status === "open" ? "Abierta" : "Cerrada"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Step 2: Weighing */}
           <div className="section-panel" style={{ opacity: !operation ? 0.5 : 1, pointerEvents: !operation ? "none" : undefined }}>

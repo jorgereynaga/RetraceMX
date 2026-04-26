@@ -8,8 +8,9 @@ from .services import register_scale_reading
 
 
 class WeighingSessionViewSet(viewsets.ModelViewSet):
-    queryset = WeighingSession.objects.select_related("collection_center", "operation", "device").all()
+    queryset = WeighingSession.objects.select_related("collection_center", "operation", "device").prefetch_related("readings").all()
     serializer_class = WeighingSessionSerializer
+    filterset_fields = ["vehicle"]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
