@@ -100,7 +100,7 @@ def change_operation_status(operation: PurchaseOperation, new_status: str, user=
     operation.save(update_fields=["status", "confirmed_at", "completed_at", "cancelled_at", "closed_by", "updated_at"])
     closing_statuses = {PurchaseOperation.Status.CONFIRMED, PurchaseOperation.Status.COMPLETED, PurchaseOperation.Status.CANCELLED}
     if new_status in closing_statuses:
-        operation.weighing_sessions.filter(status="open").update(status="closed", ended_at=now)
+        operation.weighing_sessions.filter(status=WeighingSession.Status.OPEN).update(status=WeighingSession.Status.CLOSED, ended_at=now)
     register_audit_event(actor=user, action="change_operation_status", entity=operation, details={"status": new_status, "reason": reason})
     return operation
 

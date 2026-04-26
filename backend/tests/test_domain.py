@@ -316,13 +316,13 @@ def test_confirming_operation_closes_open_weighing_sessions():
     device = _build_scale_device(center)
     session = _build_open_weighing_session(center, operation, device)
 
-    assert session.status == "open"
+    assert session.status == WeighingSession.Status.OPEN
     assert session.ended_at is None
 
     change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user)
 
     session.refresh_from_db()
-    assert session.status == "closed"
+    assert session.status == WeighingSession.Status.CLOSED
     assert session.ended_at is not None
 
 
@@ -331,12 +331,12 @@ def test_cancelling_operation_closes_open_weighing_sessions():
     device = _build_scale_device(center)
     session = _build_open_weighing_session(center, operation, device)
 
-    assert session.status == "open"
+    assert session.status == WeighingSession.Status.OPEN
 
     change_operation_status(operation, PurchaseOperation.Status.CANCELLED, user=user)
 
     session.refresh_from_db()
-    assert session.status == "closed"
+    assert session.status == WeighingSession.Status.CLOSED
     assert session.ended_at is not None
 
 
@@ -356,14 +356,14 @@ def test_completing_operation_closes_open_weighing_sessions():
     change_operation_status(operation, PurchaseOperation.Status.REGISTERED, user=user)
     session = _build_open_weighing_session(center, operation, device)
 
-    assert session.status == "open"
+    assert session.status == WeighingSession.Status.OPEN
     assert session.ended_at is None
 
     register_payment(operation=operation, amount=Decimal("100.00"), method="cash", received_by=user)
     change_operation_status(operation, PurchaseOperation.Status.COMPLETED, user=user)
 
     session.refresh_from_db()
-    assert session.status == "closed"
+    assert session.status == WeighingSession.Status.CLOSED
     assert session.ended_at is not None
 
 
@@ -373,12 +373,12 @@ def test_already_closed_sessions_are_not_double_updated():
     session = _build_open_weighing_session(center, operation, device)
 
     original_ended_at = timezone.now()
-    WeighingSession.objects.filter(pk=session.pk).update(status="closed", ended_at=original_ended_at)
+    WeighingSession.objects.filter(pk=session.pk).update(status=WeighingSession.Status.CLOSED, ended_at=original_ended_at)
 
     change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user)
 
     session.refresh_from_db()
-    assert session.status == "closed"
+    assert session.status == WeighingSession.Status.CLOSED
     assert session.ended_at == original_ended_at
 
 

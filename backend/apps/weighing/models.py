@@ -10,12 +10,16 @@ class WeighingSession(UUIDTimeStampedModel):
         VEHICLE = "vehicle", "Vehicle"
         SECONDARY = "secondary", "Secondary"
 
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        CLOSED = "closed", "Closed"
+
     collection_center = models.ForeignKey("parties.CollectionCenter", on_delete=models.PROTECT, related_name="weighing_sessions")
     operation = models.ForeignKey("operations.PurchaseOperation", on_delete=models.CASCADE, related_name="weighing_sessions", null=True, blank=True)
     device = models.ForeignKey("devices.Device", on_delete=models.PROTECT, related_name="weighing_sessions")
     vehicle = models.ForeignKey("parties.Vehicle", on_delete=models.PROTECT, related_name="weighing_sessions", null=True, blank=True)
     kind = models.CharField(max_length=20, choices=Kind.choices)
-    status = models.CharField(max_length=30, default="open")
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.OPEN)
     manual_entry = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)

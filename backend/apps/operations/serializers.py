@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.weighing.models import WeighingSession
+
 from .models import PurchaseOperation, TicketItem
 
 
@@ -29,7 +31,7 @@ class PurchaseOperationSerializer(serializers.ModelSerializer):
         return None
 
     def get_active_weighing_session(self, obj):
-        session = obj.weighing_sessions.filter(status="open").first()
+        session = obj.weighing_sessions.filter(status=WeighingSession.Status.OPEN).first()
         return str(session.pk) if session else None
 
 
