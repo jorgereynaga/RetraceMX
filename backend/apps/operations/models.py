@@ -71,7 +71,7 @@ class TicketItem(UUIDTimeStampedModel):
     tare_weight_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     net_weight_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     merma_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
-    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    unit_price = models.DecimalField(max_digits=12, decimal_places=5, default=Decimal("0"))
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     sort_order = models.PositiveIntegerField(default=0)

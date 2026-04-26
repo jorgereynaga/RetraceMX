@@ -82,7 +82,7 @@ export function PurchasePage() {
   const [todayOps, setTodayOps] = useState<PurchaseOperation[]>([]);
   const [opsLoading, setOpsLoading] = useState(false);
   const [opsPage, setOpsPage] = useState(0);
-  const OPS_PAGE_SIZE = 3;
+  const OPS_PAGE_SIZE = 2;
 
   useEffect(() => {
     Promise.all([
@@ -643,7 +643,7 @@ export function PurchasePage() {
               <h3>① Datos de la compra</h3>
               {operation && <span className="badge badge-green">Folio: {operation.folio}</span>}
             </div>
-            <div className="section-panel-body" style={{ display: "grid", gap: 12 }}>
+            <div className="section-panel-body" style={{ display: "grid", gap: 12, minHeight: 260 }}>
               {collectionCenters.length > 1 && (
                 <label>
                   Centro de acopio
