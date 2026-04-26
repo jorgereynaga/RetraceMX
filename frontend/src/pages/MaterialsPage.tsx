@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import type { Material, MaterialFamily } from "../types";
 import { Page } from "../components/Page";
@@ -39,6 +39,9 @@ export function MaterialsPage() {
   const [sortKey, setSortKey] = useState<SortKey>("code");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [message, setMessage] = useState<string | null>(null);
+  const [editingMermaId, setEditingMermaId] = useState<string | null>(null);
+  const [editingMermaValue, setEditingMermaValue] = useState("");
+  const mermaCommitting = useRef(false);
 
   async function refresh() {
     setItems(await api.materials().catch(() => []));
@@ -106,6 +109,32 @@ export function MaterialsPage() {
     }
     setSortKey(nextKey);
     setSortDirection("asc");
+  }
+
+  function startMermaEdit(item: Material, event: MouseEvent) {
+    event.stopPropagation();
+    setEditingMermaId(item.id);
+    setEditingMermaValue(item.default_merma_pct != null ? String(parseFloat(item.default_merma_pct) * 100) : "");
+  }
+
+  async function commitMermaEdit(item: Material) {
+    if (mermaCommitting.current) return;
+    mermaCommitting.current = true;
+    try {
+      const raw = editingMermaValue.trim();
+      const pct = raw === "" ? null : parseFloat(raw) / 100;
+      setEditingMermaId(null);
+      setEditingMermaValue("");
+      if (pct !== null && isNaN(pct)) return;
+      setMessage(null);
+      await api.materialPatch(item.id, { default_merma_pct: pct });
+      setMessage("Merma actualizada.");
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar la merma");
+    } finally {
+      mermaCommitting.current = false;
+    }
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -260,7 +289,7 @@ export function MaterialsPage() {
             <th><SortableHeader label="Valorizable" active={sortKey === "valuation"} direction={sortDirection} onClick={() => toggleSort("valuation")} /></th>
             <th><SortableHeader label="Revisión" active={sortKey === "review"} direction={sortDirection} onClick={() => toggleSort("review")} /></th>
             <th><SortableHeader label="Activo" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
-            <th>Merma %</th>
+            <th title="Clic en la celda para editar">Merma % ✎</th>
           </tr>
         </thead>
         <tbody>
@@ -277,7 +306,31 @@ export function MaterialsPage() {
               <td>{item.valuation_possible ? "Sí" : "No"}</td>
               <td>{item.requires_special_review ? "Sí" : "No"}</td>
               <td>{item.is_active ? "Sí" : "No"}</td>
-              <td>{item.default_merma_pct != null ? `${(parseFloat(item.default_merma_pct) * 100).toFixed(2)}%` : "3% (global)"}</td>
+              <td onClick={(e) => startMermaEdit(item, e)} title="Clic para editar merma" style={{ cursor: "text", minWidth: 100 }}>
+                {editingMermaId === item.id ? (
+                  <input
+                    type="number"
+                    value={editingMermaValue}
+                    autoFocus
+                    min={0}
+                    max={100}
+                    step={0.01}
+                    placeholder="ej. 3"
+                    style={{ width: 80 }}
+                    onChange={(e) => setEditingMermaValue(e.target.value)}
+                    onBlur={() => commitMermaEdit(item)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitMermaEdit(item);
+                      if (e.key === "Escape") { setEditingMermaId(null); setEditingMermaValue(""); }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  item.default_merma_pct != null
+                    ? `${(parseFloat(item.default_merma_pct) * 100).toFixed(2)}%`
+                    : <span className="muted">— (global)</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

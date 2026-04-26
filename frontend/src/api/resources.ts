@@ -40,6 +40,7 @@ export const api = {
   materialFamilies: () => apiList<MaterialFamily>("/material-families/"),
   materialCreate: (payload: Record<string, unknown>) => apiPost<Material>("/materials/", payload),
   materialUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Material>(`/materials/${id}/`, payload),
+  materialPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Material>(`/materials/${id}/`, payload),
   materialDelete: (id: string) => apiDelete<void>(`/materials/${id}/`),
   priceLists: () => apiList<PriceList>("/price-lists/"),
   priceListCreate: (payload: Record<string, unknown>) => apiPost<PriceList>("/price-lists/", payload),
