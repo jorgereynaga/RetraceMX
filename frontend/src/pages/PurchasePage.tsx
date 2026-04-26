@@ -13,6 +13,7 @@ type LiveReading = {
 
 const POLL_MS = 1800;
 const MERMA_PCT = 0.03;
+const WEIGHT_ANOMALY_THRESHOLD = 0.20;
 
 function fmtKg(v: number) {
   return v.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -92,6 +93,7 @@ export function PurchasePage() {
   const [historyDateTo, setHistoryDateTo] = useState("");
   const [historyDisplayCount, setHistoryDisplayCount] = useState(10);
   const HISTORY_PAGE_SIZE = 10;
+  const [vehicleHistoryAll, setVehicleHistoryAll] = useState<WeighingSession[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -526,6 +528,24 @@ export function PurchasePage() {
     return found?.id ?? null;
   }, [operation, plateInput, allVehicles, customerVehicles]);
 
+  const historyStats = useMemo(() => {
+    const MIN_SESSIONS = 2;
+    const completed = vehicleHistoryAll.filter((s) => {
+      const g = s.readings.find((r) => r.reading_type === "gross");
+      const t = s.readings.find((r) => r.reading_type === "tare");
+      return g && t;
+    });
+    if (completed.length < MIN_SESSIONS) return null;
+    let sumGross = 0, sumNet = 0, count = 0;
+    for (const s of completed) {
+      const g = parseFloat(s.readings.find((r) => r.reading_type === "gross")?.gross_weight_kg ?? "0") || 0;
+      const t = parseFloat(s.readings.find((r) => r.reading_type === "tare")?.tare_weight_kg ?? "0") || 0;
+      if (g > 0 && t > 0) { sumGross += g; sumNet += Math.max(0, g - t); count++; }
+    }
+    if (count < MIN_SESSIONS) return null;
+    return { avgGrossKg: sumGross / count, avgNetKg: sumNet / count, count };
+  }, [vehicleHistoryAll]);
+
   useEffect(() => {
     setHistoryDateFrom("");
     setHistoryDateTo("");
@@ -548,6 +568,13 @@ export function PurchasePage() {
       .catch(() => setVehicleHistory([]))
       .finally(() => setVehicleHistoryLoading(false));
   }, [selectedVehicleId, historyDateFrom, historyDateTo]);
+
+  useEffect(() => {
+    if (!selectedVehicleId) { setVehicleHistoryAll([]); return; }
+    api.weighingSessionsByVehicle(selectedVehicleId, {})
+      .then((sessions) => setVehicleHistoryAll(sessions))
+      .catch(() => setVehicleHistoryAll([]));
+  }, [selectedVehicleId]);
 
   const operationCustomer = useMemo(() => {
     if (!operation?.customer) return null;
@@ -811,10 +838,17 @@ export function PurchasePage() {
             <div className="section-panel">
               <div className="section-panel-header">
                 <h3>Historial de pesajes del vehículo</h3>
-                {vehicleHistoryLoading
-                  ? <span className="muted" style={{ fontSize: "0.78rem" }}>Cargando…</span>
-                  : <span className="badge badge-gray">{vehicleHistory.length} sesión{vehicleHistory.length !== 1 ? "es" : ""}</span>
-                }
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {vehicleHistoryLoading
+                    ? <span className="muted" style={{ fontSize: "0.78rem" }}>Cargando…</span>
+                    : <span className="badge badge-gray">{vehicleHistory.length} sesión{vehicleHistory.length !== 1 ? "es" : ""}</span>
+                  }
+                  {historyStats && !vehicleHistoryLoading && (
+                    <span className="badge badge-blue" style={{ fontSize: "0.68rem" }} title={`Promedio de ${historyStats.count} sesiones completadas`}>
+                      ⌀ neto {fmtKg(historyStats.avgNetKg)} kg
+                    </span>
+                  )}
+                </div>
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-end", padding: "10px 20px 0", flexWrap: "wrap" }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: "0.78rem", margin: 0 }}>
@@ -872,8 +906,13 @@ export function PurchasePage() {
                           const netKgVal = grossKgVal > 0 && tareKgVal > 0 ? Math.max(0, grossKgVal - tareKgVal) : null;
                           const dateStr = new Date(session.started_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" });
                           const timeStr = new Date(session.started_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+                          const netAnomaly = historyStats && netKgVal !== null && historyStats.avgNetKg > 0
+                            ? Math.abs(netKgVal - historyStats.avgNetKg) / historyStats.avgNetKg
+                            : null;
+                          const isNetAnomalous = netAnomaly !== null && netAnomaly > WEIGHT_ANOMALY_THRESHOLD;
+                          const netAnomalyDir = isNetAnomalous && netKgVal !== null ? (netKgVal > historyStats!.avgNetKg ? "high" : "low") : null;
                           return (
-                            <tr key={session.id}>
+                            <tr key={session.id} style={isNetAnomalous ? { background: netAnomalyDir === "high" ? "rgba(239,68,68,0.06)" : "rgba(234,179,8,0.07)" } : undefined}>
                               <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                                 {dateStr} {timeStr}
                               </td>
@@ -888,6 +927,19 @@ export function PurchasePage() {
                               </td>
                               <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: netKgVal !== null ? 600 : undefined }}>
                                 {netKgVal !== null ? fmtKg(netKgVal) : "—"}
+                                {isNetAnomalous && (
+                                  <span
+                                    title={`Neto ${netAnomalyDir === "high" ? "inusualmente alto" : "inusualmente bajo"}: ${(netAnomaly! * 100).toFixed(0)}% vs promedio histórico (${fmtKg(historyStats!.avgNetKg)} kg)`}
+                                    style={{
+                                      marginLeft: 5,
+                                      cursor: "help",
+                                      fontSize: "0.75rem",
+                                      color: netAnomalyDir === "high" ? "var(--danger)" : "var(--warning, #ca8a04)",
+                                    }}
+                                  >
+                                    {netAnomalyDir === "high" ? "⚠ Alto" : "⚠ Bajo"}
+                                  </span>
+                                )}
                               </td>
                               <td>
                                 <span className={`badge ${session.status === "open" ? "badge-amber" : "badge-green"}`} style={{ fontSize: "0.68rem" }}>
@@ -1068,6 +1120,28 @@ export function PurchasePage() {
                     <div style={{ fontSize: "1.2rem", fontWeight: 700, color: diffRefKg ? "var(--text)" : "var(--muted)", marginTop: 4 }}>
                       {diffRefKg ? `${fmtKg(parseFloat(diffRefKg))} kg` : "Pendiente — no es necesario seleccionar material"}
                     </div>
+                    {(() => {
+                      if (!diffRefKg || !historyStats || historyStats.avgGrossKg <= 0) return null;
+                      const capturedGross = parseFloat(diffRefKg);
+                      const deviation = Math.abs(capturedGross - historyStats.avgGrossKg) / historyStats.avgGrossKg;
+                      if (deviation <= WEIGHT_ANOMALY_THRESHOLD) return null;
+                      const dir = capturedGross > historyStats.avgGrossKg ? "high" : "low";
+                      return (
+                        <div style={{
+                          marginTop: 8, padding: "6px 10px", borderRadius: "var(--radius-sm)",
+                          background: dir === "high" ? "rgba(239,68,68,0.08)" : "rgba(234,179,8,0.10)",
+                          border: `1px solid ${dir === "high" ? "rgba(239,68,68,0.35)" : "rgba(234,179,8,0.4)"}`,
+                          fontSize: "0.78rem",
+                          color: dir === "high" ? "var(--danger)" : "#92400e",
+                          display: "flex", gap: 6, alignItems: "center",
+                        }}>
+                          <span>⚠</span>
+                          <span>
+                            Peso inicial {dir === "high" ? "inusualmente alto" : "inusualmente bajo"} — {(deviation * 100).toFixed(0)}% vs promedio histórico del vehículo ({fmtKg(historyStats.avgGrossKg)} kg, {historyStats.count} sesiones)
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {diffStep === "cycling" && (
@@ -1116,6 +1190,27 @@ export function PurchasePage() {
                               ↺ Recapturar
                             </button>
                           </div>
+                          {(() => {
+                            if (!historyStats || historyStats.avgNetKg <= 0 || netClean <= 0) return null;
+                            const deviation = Math.abs(netClean - historyStats.avgNetKg) / historyStats.avgNetKg;
+                            if (deviation <= WEIGHT_ANOMALY_THRESHOLD) return null;
+                            const dir = netClean > historyStats.avgNetKg ? "high" : "low";
+                            return (
+                              <div style={{
+                                padding: "6px 10px", borderRadius: "var(--radius-sm)",
+                                background: dir === "high" ? "rgba(239,68,68,0.08)" : "rgba(234,179,8,0.10)",
+                                border: `1px solid ${dir === "high" ? "rgba(239,68,68,0.35)" : "rgba(234,179,8,0.4)"}`,
+                                fontSize: "0.78rem",
+                                color: dir === "high" ? "var(--danger)" : "#92400e",
+                                display: "flex", gap: 6, alignItems: "center",
+                              }}>
+                                <span>⚠</span>
+                                <span>
+                                  Neto {dir === "high" ? "inusualmente alto" : "inusualmente bajo"} — {(deviation * 100).toFixed(0)}% vs promedio histórico del vehículo ({fmtKg(historyStats.avgNetKg)} kg, {historyStats.count} sesiones)
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                       {!materialId && (
