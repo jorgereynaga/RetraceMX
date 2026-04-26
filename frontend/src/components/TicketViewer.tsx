@@ -100,7 +100,7 @@ export function TicketViewer({ operation, items, center, customer, vehicle, mate
       {/* ── Items header ──────────────────────── */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "60px 1fr 40px 50px 60px",
+        gridTemplateColumns: "60px 1fr 76px 50px 60px",
         gap: "0 4px",
         fontSize: "0.7rem",
         fontWeight: 700,
@@ -124,17 +124,23 @@ export function TicketViewer({ operation, items, center, customer, vehicle, mate
         const amount = parseFloat(item.amount) || 0;
         const gross = parseFloat(item.gross_weight_kg) || 0;
         const tare = parseFloat(item.tare_weight_kg) || 0;
+        const mermaPct = (net + merma) > 0 ? (merma / (net + merma)) * 100 : 0;
         return (
           <div key={item.id} style={{ marginBottom: 6 }}>
             <div style={{
               display: "grid",
-              gridTemplateColumns: "60px 1fr 40px 50px 60px",
+              gridTemplateColumns: "60px 1fr 76px 50px 60px",
               gap: "0 4px",
               fontSize: "0.75rem",
             }}>
               <span style={{ fontVariantNumeric: "tabular-nums" }}>{Math.round(net)}</span>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{matName}</span>
-              <span>{Math.round(merma)}</span>
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                {Math.round(merma)}kg
+                {merma > 0 && (
+                  <span style={{ fontSize: "0.68rem", opacity: 0.8, marginLeft: 2 }}>({mermaPct.toFixed(1)}%)</span>
+                )}
+              </span>
               <span>{price.toFixed(1)}</span>
               <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(amount)}</span>
             </div>
