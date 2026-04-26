@@ -25,7 +25,7 @@ class PurchaseOperationViewSet(viewsets.ModelViewSet):
         "driver",
         "opened_by",
         "closed_by",
-    ).prefetch_related("items", "payments")
+    ).prefetch_related("items", "payments", "weighing_sessions")
     serializer_class = PurchaseOperationSerializer
 
     @decorators.action(detail=False, methods=["post"])

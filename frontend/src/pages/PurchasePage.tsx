@@ -277,7 +277,33 @@ export function PurchasePage() {
     if (!operation || !canAddItemDiff) return;
     setItemLoading(true); setItemMsg(null);
     try {
-      const item = await api.createTicketItem({
+      const sessionId = operation.active_weighing_session ?? null;
+
+      let tareReadingId: string | null = null;
+
+      if (sessionId && scaleDevice) {
+        const [, tareReading] = await Promise.all([
+          api.createScaleReading({
+            session: sessionId,
+            device: scaleDevice.id,
+            reading_type: "gross",
+            gross_weight_kg: diffRefKg,
+            raw_value: diffRefKg,
+            is_stable: true,
+          }),
+          api.createScaleReading({
+            session: sessionId,
+            device: scaleDevice.id,
+            reading_type: "tare",
+            tare_weight_kg: capturedTareKg,
+            raw_value: capturedTareKg,
+            is_stable: true,
+          }),
+        ]);
+        tareReadingId = tareReading.id;
+      }
+
+      const payload: Record<string, unknown> = {
         operation: operation.id,
         material: materialId,
         method,
@@ -286,7 +312,11 @@ export function PurchasePage() {
         merma_kg: mermaNum.toFixed(3),
         unit_price: unitPrice,
         notes: "",
-      });
+      };
+      if (sessionId) payload.weighing_session = sessionId;
+      if (tareReadingId) payload.scale_reading = tareReadingId;
+
+      const item = await api.createTicketItem(payload);
       setItems((prev) => [...prev, item]);
       const refreshed = await api.operationDetail(operation.id);
       setOperation(refreshed);

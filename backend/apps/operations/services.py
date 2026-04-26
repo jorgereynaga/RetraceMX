@@ -8,9 +8,11 @@ from django.utils import timezone
 
 from apps.auditing.services import register_audit_event
 from apps.core.utils import generate_folio
+from apps.devices.models import Device
 from apps.inventory.models import InventoryMovement
 from apps.inventory.services import create_inventory_movement
 from apps.payments.services import sync_payment_status
+from apps.weighing.models import WeighingSession
 
 from .models import PurchaseOperation, TicketItem
 
@@ -54,6 +56,19 @@ def open_purchase_operation(*, collection_center, customer, opened_by, route=Non
         notes=notes,
         status=PurchaseOperation.Status.OPEN,
     )
+    if vehicle:
+        scale_device = Device.objects.filter(
+            collection_center=collection_center,
+            kind=Device.Kind.VEHICLE_SCALE,
+        ).first()
+        if scale_device:
+            WeighingSession.objects.create(
+                collection_center=collection_center,
+                operation=operation,
+                device=scale_device,
+                vehicle=vehicle,
+                kind=WeighingSession.Kind.VEHICLE,
+            )
     register_audit_event(actor=opened_by, action="open_purchase_operation", entity=operation, details={"source": source})
     return operation
 

@@ -7,6 +7,7 @@ class PurchaseOperationSerializer(serializers.ModelSerializer):
     opened_by_name = serializers.SerializerMethodField()
     driver_name = serializers.SerializerMethodField()
     vehicle_plate = serializers.SerializerMethodField()
+    active_weighing_session = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseOperation
@@ -26,6 +27,10 @@ class PurchaseOperationSerializer(serializers.ModelSerializer):
         if obj.vehicle:
             return obj.vehicle.plate_number
         return None
+
+    def get_active_weighing_session(self, obj):
+        session = obj.weighing_sessions.filter(status="open").first()
+        return str(session.pk) if session else None
 
 
 class TicketItemSerializer(serializers.ModelSerializer):
@@ -50,6 +55,8 @@ class TicketItemWriteSerializer(serializers.ModelSerializer):
             "unit_price",
             "notes",
             "reason",
+            "weighing_session",
+            "scale_reading",
         ]
         extra_kwargs = {
             "operation": {"required": False},
@@ -61,4 +68,6 @@ class TicketItemWriteSerializer(serializers.ModelSerializer):
             "merma_kg": {"required": False},
             "unit_price": {"required": False},
             "notes": {"required": False},
+            "weighing_session": {"required": False},
+            "scale_reading": {"required": False},
         }

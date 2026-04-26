@@ -127,6 +127,21 @@ export type PurchaseOperation = {
   opened_by_name?: string | null;
   driver_name?: string | null;
   vehicle_plate?: string | null;
+  active_weighing_session?: string | null;
+};
+
+export type ScaleReading = {
+  id: string;
+  session: string;
+  device: string;
+  reading_type: "gross" | "tare" | "direct" | "manual" | "contingency";
+  gross_weight_kg?: string | null;
+  tare_weight_kg?: string | null;
+  net_weight_kg?: string | null;
+  raw_value?: string;
+  is_stable?: boolean;
+  is_manual?: boolean;
+  captured_at?: string;
 };
 
 export type PriceSuggestion = {
