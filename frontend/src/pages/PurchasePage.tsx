@@ -654,6 +654,7 @@ export function PurchasePage() {
                       <th>Folio</th>
                       <th>Cliente</th>
                       <th>Encargado</th>
+                      <th>Conductor</th>
                       <th>Hora</th>
                       <th>Estado</th>
                       <th>Total</th>
@@ -681,6 +682,7 @@ export function PurchasePage() {
                           </td>
                           <td>{customer?.trade_name || customer?.legal_name || "—"}</td>
                           <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.opened_by_name ?? "—"}</td>
+                          <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.driver_name?.trim() || "—"}</td>
                           <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{time}</td>
                           <td>
                             <span className={`badge ${statusBadge[op.status] ?? "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
