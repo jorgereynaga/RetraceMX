@@ -1,0 +1,479 @@
+Necesito mejorar el módulo Caja del sistema Acopio360, utilizado para registrar pagos derivados de operaciones de compra de materiales en una empresa recicladora.
+
+Actualmente la vista permite buscar una operación, ver el total, pendiente, seleccionar método de pago, capturar monto, referencia y observaciones. Sin embargo, se requiere mejorar la operación para que funcione como una caja real: calcular efectivo recibido, cambio a devolver, pagos parciales, pagos mixtos, cierre de operación, validaciones y ticket de pago.
+
+Objetivo
+
+Optimizar el módulo de caja para que el usuario pueda registrar pagos de manera rápida, segura y clara, evitando errores en montos, pagos duplicados, cierre incorrecto de operaciones o confusión entre importe total, pendiente, monto recibido y cambio.
+
+1. Rediseñar la estructura visual de la caja
+
+La pantalla debe organizarse en secciones claras:
+
+A. Búsqueda de operación
+
+Mantener el campo de búsqueda por folio, pero mejorar su comportamiento.
+
+Reglas
+Permitir buscar por:
+folio de operación;
+código de barras;
+cliente/proveedor;
+placa;
+fecha;
+estado de operación.
+El lector de código de barras debe funcionar como teclado.
+Al encontrar una operación, cargar automáticamente:
+folio;
+cliente/proveedor;
+placa;
+fecha;
+total de la operación;
+monto pagado;
+monto pendiente;
+estado de la operación.
+Mejora visual
+
+Mostrar una tarjeta resumen de la operación:
+
+Campo	Dato
+Folio	OP-20260425222348081606
+Cliente/proveedor	Nombre del cliente
+Placa	Placa capturada
+Total	$45,689.63
+Pagado	$0.00
+Pendiente	$45,689.63
+Estado	Pendiente / Parcial / Pagado / Cerrado
+2. Diferenciar “monto recibido”, “monto aplicado” y “cambio”
+
+Actualmente solo aparece el campo Monto, pero en caja se necesita distinguir entre:
+
+Total de la operación
+Monto pendiente
+Monto recibido por el cajero
+Monto que se aplicará al pago
+Cambio a devolver
+Nueva lógica requerida
+
+Agregar campos visibles:
+
+Campo	Función
+Total operación	Importe total de la compra
+Pagado anteriormente	Suma de pagos ya registrados
+Pendiente por pagar	Total menos pagos registrados
+Monto recibido	Dinero entregado por el cliente/cajero
+Monto aplicado	Cantidad que se registrará como pago
+Cambio a devolver	Monto recibido menos monto aplicado
+3. Cálculo automático de cambio
+
+Cuando el método de pago sea Efectivo, el sistema debe permitir capturar cuánto dinero se recibió físicamente y calcular automáticamente el cambio.
+
+Reglas para pago en efectivo
+El usuario captura el monto recibido.
+El sistema calcula automáticamente:
+Cambio = Monto recibido - Monto pendiente
+Si el monto recibido es mayor al pendiente:
+el pago aplicado debe ser igual al pendiente;
+el sistema debe mostrar el cambio a devolver.
+Si el monto recibido es igual al pendiente:
+cambio igual a $0.00;
+la operación queda pagada.
+Si el monto recibido es menor al pendiente:
+registrar como pago parcial;
+la operación queda con estado “Pago parcial”.
+Ejemplo
+Total operación: $45,689.63
+Pendiente: $45,689.63
+Monto recibido: $46,000.00
+
+Monto aplicado: $45,689.63
+Cambio a devolver: $310.37
+Estado: Pagado
+Validaciones
+No permitir monto recibido en cero para registrar pago.
+No permitir montos negativos.
+No permitir registrar un pago mayor al pendiente como “monto aplicado”.
+En efectivo sí se puede recibir más dinero, pero el excedente debe calcularse como cambio, no como pago adicional.
+El cambio debe resaltarse visualmente.
+4. Pagos parciales
+
+El sistema debe permitir registrar pagos parciales.
+
+Reglas
+
+Si el usuario captura un monto menor al pendiente:
+
+Pendiente anterior: $45,689.63
+Monto recibido: $20,000.00
+Monto aplicado: $20,000.00
+Nuevo pendiente: $25,689.63
+Estado: Pago parcial
+
+Después debe permitir registrar otro pago hasta liquidar el total.
+
+Estados sugeridos
+Estado	Descripción
+Pendiente	No tiene pagos registrados
+Parcial	Tiene pagos, pero aún queda saldo pendiente
+Pagado	El total fue cubierto
+Cerrado	La operación fue finalizada administrativamente
+Cancelado	La operación fue anulada
+Ajustado	La operación tuvo modificación posterior
+5. Pagos mixtos
+
+Agregar soporte para pagos mixtos, porque en una caja real una operación puede pagarse con más de un método.
+
+Métodos sugeridos
+Efectivo
+Transferencia
+Tarjeta
+Cheque
+Vale
+Crédito
+Otro
+Reglas por método
+Método	Requiere referencia	Permite cambio	Observaciones
+Efectivo	No	Sí	Calcula cambio
+Transferencia	Sí	No	Requiere referencia bancaria
+Tarjeta	Sí	No	Requiere autorización o voucher
+Cheque	Sí	No	Requiere número de cheque
+Vale	Sí	No	Requiere folio
+Crédito	Opcional	No	Deja saldo pendiente
+Otro	Opcional	No	Requiere observación
+6. Botón “Registrar pago”
+
+El botón debe aplicar reglas según el método seleccionado.
+
+Para efectivo
+
+Campos:
+
+Monto recibido
+Monto aplicado
+Cambio a devolver
+
+Comportamiento:
+
+Si el monto recibido es mayor o igual al pendiente:
+registrar pago por el monto pendiente;
+calcular cambio;
+marcar operación como pagada.
+Si el monto recibido es menor:
+registrar pago parcial;
+actualizar pendiente.
+Para transferencia, tarjeta, cheque o vale
+
+Campos:
+
+Monto aplicado
+Referencia obligatoria
+Observaciones opcionales
+
+Comportamiento:
+
+No calcular cambio.
+No permitir monto aplicado mayor al pendiente.
+Validar que la referencia esté capturada cuando sea obligatoria.
+7. Botón “Cerrar operación”
+
+Actualmente existe un botón para cerrar operación. Debe tener reglas más estrictas.
+
+Reglas
+No permitir cerrar una operación con saldo pendiente, salvo que el usuario tenga permiso especial.
+Si la operación tiene saldo pendiente, mostrar alerta:
+La operación aún tiene un saldo pendiente de $25,689.63.
+No puede cerrarse hasta liquidar el pago o registrar una autorización de cierre con saldo pendiente.
+Si el saldo pendiente es cero:
+permitir cerrar la operación;
+cambiar estado a “Cerrada”;
+bloquear nuevos pagos o partidas, salvo ajustes autorizados.
+Cierre con saldo pendiente
+
+Solo usuarios autorizados deben poder cerrar con saldo pendiente.
+
+En ese caso, solicitar:
+
+motivo;
+observaciones;
+usuario que autoriza;
+fecha y hora;
+saldo pendiente reconocido.
+8. Tabla de pagos registrados
+
+La sección Pagos actualmente está vacía o poco visible. Debe mostrar todos los pagos registrados.
+
+Columnas sugeridas
+Fecha/hora	Monto aplicado	Método	Referencia	Cambio	Usuario	Estado
+Acciones por pago
+
+Cada pago debe permitir:
+
+ver detalle;
+cancelar pago, si el usuario tiene permiso;
+imprimir comprobante;
+ver usuario que registró;
+ver fecha y hora.
+Cancelación de pago
+
+Si se cancela un pago:
+
+no debe eliminarse físicamente de la base de datos;
+debe cambiar a estado “Cancelado”;
+debe recalcularse el saldo pendiente;
+debe quedar registro en bitácora.
+9. Mejorar tabla de partidas ligadas
+
+Actualmente la tabla muestra identificadores técnicos en la columna de material. Debe mostrar nombres legibles.
+
+Cambio requerido
+
+En lugar de mostrar:
+
+3ae9270b-7cde-44bb-878d-b94f2ffba5fb
+
+Debe mostrar:
+
+Lámina
+Cartón
+Computadoras
+Cables eléctricos
+Columnas sugeridas
+Partida	Material	Método	Neto kg	Precio	Importe
+Al seleccionar una partida
+
+Mostrar detalle:
+
+material;
+peso bruto;
+peso final;
+peso neto;
+precio unitario;
+importe;
+hora de captura;
+usuario que capturó.
+10. Resumen financiero visible
+
+Agregar una tarjeta de resumen financiero más clara.
+
+Tarjetas sugeridas
+Tarjeta	Dato
+Total operación	$45,689.63
+Pagado	$0.00
+Pendiente	$45,689.63
+Cambio a devolver	$0.00
+
+Cuando se capture un monto recibido en efectivo, la tarjeta de cambio debe actualizarse en tiempo real.
+
+11. Denominaciones rápidas para efectivo
+
+Para facilitar la operación de caja, agregar botones rápidos de efectivo.
+
+Botones sugeridos
+$50
+$100
+$200
+$500
+$1,000
+$2,000
+$5,000
+$10,000
+“Monto exacto”
+Funcionamiento
+Al presionar un botón, se suma al campo Monto recibido.
+El botón “Monto exacto” llena automáticamente el monto pendiente.
+El sistema recalcula el cambio en tiempo real.
+12. Flujo recomendado de caja
+
+El flujo debe quedar así:
+
+Cajero busca o escanea folio.
+El sistema carga la operación.
+El cajero revisa:
+cliente;
+total;
+partidas;
+pendiente.
+Selecciona método de pago.
+Captura monto recibido o monto aplicado.
+El sistema calcula:
+pago aplicado;
+nuevo pendiente;
+cambio.
+Cajero registra pago.
+El sistema muestra confirmación.
+Si el saldo queda en cero:
+permite cerrar operación;
+genera comprobante de pago;
+permite imprimir ticket.
+Si queda saldo pendiente:
+mantiene la operación en estado parcial.
+13. Ticket o comprobante de pago
+
+Al registrar un pago, el sistema debe generar un comprobante.
+
+Datos mínimos
+Nombre de la recicladora.
+Folio de operación.
+Folio de pago.
+Fecha y hora.
+Cajero.
+Cliente/proveedor.
+Total de operación.
+Monto pagado.
+Método de pago.
+Referencia.
+Cambio entregado.
+Saldo pendiente.
+Estado de la operación.
+Acciones
+Imprimir comprobante.
+Descargar PDF.
+Reimprimir desde historial.
+Mostrar ticket de compra completo si la operación queda cerrada.
+14. Seguridad y permisos
+
+Agregar reglas por tipo de usuario.
+
+Permisos sugeridos
+Acción	Cajero	Administrador
+Registrar pago	Sí	Sí
+Cancelar pago	No	Sí
+Cerrar operación pagada	Sí	Sí
+Cerrar con saldo pendiente	No	Sí
+Editar pago	No	Sí
+Ver historial	Sí	Sí
+Descargar reportes	No	Sí
+15. Bitácora de movimientos
+
+Registrar trazabilidad de todas las acciones de caja.
+
+Eventos a registrar
+operación consultada;
+pago registrado;
+pago cancelado;
+operación cerrada;
+cierre con saldo pendiente;
+reimpresión de ticket;
+descarga de comprobante;
+modificación manual de saldo, si existiera.
+Datos de bitácora
+usuario;
+fecha y hora;
+acción;
+folio de operación;
+monto;
+método de pago;
+observaciones;
+IP o dispositivo, si está disponible.
+16. Reportes de caja
+
+Agregar reportes básicos para cierre diario.
+
+Reporte de corte de caja
+
+Debe mostrar:
+
+Concepto	Monto
+Total cobrado en efectivo	$
+Total por transferencia	$
+Total por tarjeta	$
+Total por cheque	$
+Total general cobrado	$
+Operaciones pagadas	Número
+Operaciones parciales	Número
+Operaciones pendientes	Número
+Pagos cancelados	Número
+Filtros
+fecha;
+cajero;
+método de pago;
+centro de acopio;
+estado de operación.
+17. Mejoras de interfaz recomendadas
+Cambios visuales
+Resaltar el saldo pendiente.
+Resaltar el cambio a devolver en efectivo.
+Usar etiquetas claras:
+“Monto recibido”
+“Pago aplicado”
+“Cambio”
+“Saldo pendiente”
+Mostrar mensajes de confirmación después de registrar pago.
+Evitar que el botón “Registrar pago” esté activo si faltan datos.
+Separar visualmente:
+información de operación;
+captura de pago;
+pagos registrados;
+partidas ligadas;
+cierre.
+Mensajes sugeridos
+
+Cuando el pago cubre el total:
+
+Pago registrado correctamente. La operación ha sido liquidada.
+Cambio a devolver: $310.37
+
+Cuando es pago parcial:
+
+Pago parcial registrado correctamente.
+Saldo pendiente: $25,689.63
+
+Cuando falta referencia:
+
+Este método de pago requiere una referencia.
+
+Cuando se intenta cerrar con saldo pendiente:
+
+No es posible cerrar la operación porque aún tiene saldo pendiente.
+18. Reglas técnicas generales
+
+Antes de modificar el código, revisar la estructura actual del proyecto e identificar los modelos, componentes, servicios o tablas relacionados con:
+
+operaciones;
+compras;
+partidas;
+pagos;
+caja;
+clientes;
+usuarios;
+tickets;
+historial;
+métodos de pago;
+estados de operación.
+
+Implementar los cambios respetando la arquitectura actual.
+
+Reglas de cálculo
+pagado_total = suma de pagos activos
+pendiente = total_operacion - pagado_total
+
+Para efectivo:
+
+si monto_recibido >= pendiente:
+    monto_aplicado = pendiente
+    cambio = monto_recibido - pendiente
+    estado = pagado
+si monto_recibido < pendiente:
+    monto_aplicado = monto_recibido
+    cambio = 0
+    estado = parcial
+
+Para métodos distintos a efectivo:
+
+monto_aplicado <= pendiente
+cambio = 0
+Resultado esperado
+
+El módulo de caja debe permitir operar pagos como una caja real:
+
+buscar operación;
+visualizar total, pagado y pendiente;
+capturar monto recibido;
+calcular automáticamente cambio;
+registrar pagos parciales o totales;
+registrar pagos mixtos;
+validar referencias según método;
+cerrar operación solo cuando corresponda;
+generar comprobante;
+consultar pagos y partidas posteriormente;
+mantener bitácora y reportes de corte de caja.
