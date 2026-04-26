@@ -745,7 +745,14 @@ export function PurchasePage() {
           <div className="section-panel">
             <div className="section-panel-header">
               <h3>① Datos de la compra</h3>
-              {operation && <span className="badge badge-green">Folio: {operation.folio}</span>}
+              {operation && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="badge badge-green">Folio: {operation.folio}</span>
+                  <span className="badge badge-blue" title="Conductor asignado">
+                    🧑‍✈️ {operation.driver_name ?? "Sin conductor"}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="section-panel-body" style={{ display: "grid", gap: 12, minHeight: 260 }}>
               {collectionCenters.length > 1 && (
