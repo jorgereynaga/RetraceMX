@@ -21,8 +21,10 @@ export type Vehicle = {
   id: string;
   plate_number: string;
   label: string;
+  owner?: string | null;
   capacity_kg: string;
   expected_km_per_liter: string;
+  is_active?: boolean;
 };
 
 export type Driver = {
@@ -118,6 +120,13 @@ export type PurchaseOperation = {
   total_amount: string;
   collection_center: string;
   customer: string;
+  vehicle?: string | null;
+  driver?: string | null;
+  created_at?: string;
+  opened_by?: string | null;
+  opened_by_name?: string | null;
+  driver_name?: string | null;
+  vehicle_plate?: string | null;
 };
 
 export type PriceSuggestion = {

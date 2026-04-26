@@ -17,6 +17,7 @@ class PersonOrCompanyViewSet(viewsets.ModelViewSet):
 class VehicleViewSet(viewsets.ModelViewSet):
     queryset = Vehicle.objects.all().order_by("plate_number")
     serializer_class = VehicleSerializer
+    filterset_fields = ["owner"]
 
 
 class DriverViewSet(viewsets.ModelViewSet):

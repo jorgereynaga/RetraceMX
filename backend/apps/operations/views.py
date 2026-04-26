@@ -74,12 +74,24 @@ class PurchaseOperationViewSet(viewsets.ModelViewSet):
 class TicketItemViewSet(viewsets.ModelViewSet):
     queryset = TicketItem.objects.select_related("operation", "material", "weighing_session", "scale_reading")
     serializer_class = TicketItemSerializer
+    filterset_fields = ["operation"]
 
     def create(self, request, *args, **kwargs):
         serializer = TicketItemWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        operation = serializer.validated_data["operation"]
+        closed_statuses = {
+            PurchaseOperation.Status.CONFIRMED,
+            PurchaseOperation.Status.COMPLETED,
+            PurchaseOperation.Status.CANCELLED,
+        }
+        if operation.status in closed_statuses:
+            return response.Response(
+                {"detail": f"No se pueden agregar partidas a una operación en estado '{operation.status}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         item = register_ticket_item(
-            operation=serializer.validated_data["operation"],
+            operation=operation,
             material=serializer.validated_data["material"],
             method=serializer.validated_data["method"],
             unit_price=serializer.validated_data["unit_price"],
@@ -94,6 +106,42 @@ class TicketItemViewSet(viewsets.ModelViewSet):
         )
         output = self.get_serializer(item)
         return response.Response(output.data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        item = self.get_object()
+        operation = item.operation
+        if operation.status in {
+            PurchaseOperation.Status.CONFIRMED,
+            PurchaseOperation.Status.COMPLETED,
+            PurchaseOperation.Status.CANCELLED,
+        }:
+            return response.Response(
+                {"detail": "No se puede eliminar una partida de una operación cerrada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        register_audit_event(
+            actor=request.user,
+            action="delete_ticket_item",
+            entity=item,
+            details={
+                "operation_folio": operation.folio,
+                "material": str(item.material),
+                "net_weight_kg": str(item.net_weight_kg),
+                "amount": str(item.amount),
+            },
+        )
+        inventory_movements = list(item.inventory_movements.all())
+        for movement in inventory_movements:
+            register_audit_event(
+                actor=request.user,
+                action="delete_inventory_movement",
+                entity=movement,
+                details={"reason": "ticket_item_deleted", "ticket_item_id": str(item.pk)},
+            )
+            movement.delete()
+        item.delete()
+        recalculate_operation_total(operation)
+        return response.Response(status=status.HTTP_204_NO_CONTENT)
 
     def update(self, request, *args, **kwargs):
         item = self.get_object()

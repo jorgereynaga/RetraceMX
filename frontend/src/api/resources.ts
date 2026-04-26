@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiList, apiPatch, apiPost, apiPostFormData, apiPut } from "./client";
+import { apiDelete, apiGet, apiList, apiListAll, apiPatch, apiPost, apiPostFormData, apiPut } from "./client";
 import type {
   AuditLog,
   CollectionCenter,
@@ -57,16 +57,22 @@ export const api = {
   parties: () => apiList<Party>("/parties/"),
   materials: () => apiList<Material>("/materials/"),
   vehicles: () => apiList<Vehicle>("/vehicles/"),
+  vehiclesByOwner: (ownerId: string) => apiList<Vehicle>(`/vehicles/?owner=${encodeURIComponent(ownerId)}`),
+  vehicleCreate: (payload: Record<string, unknown>) => apiPost<Vehicle>("/vehicles/", payload),
+  vehicleDelete: (id: string) => apiDelete<void>(`/vehicles/${id}/`),
+  deleteTicketItem: (id: string) => apiDelete<void>(`/ticket-items/${id}/`),
   drivers: () => apiList<Driver>("/drivers/"),
   devices: () => apiList<Device>("/devices/"),
   routes: () => apiList<Route>("/routes/"),
   operations: () => apiList<PurchaseOperation>("/purchase-operations/"),
+  operationsAll: () => apiListAll<PurchaseOperation>("/purchase-operations/"),
   operationDetail: (id: string) => apiGet<PurchaseOperation>(`/purchase-operations/${id}/`),
   operationCreate: (payload: Record<string, unknown>) => apiPost<PurchaseOperation>("/purchase-operations/open/", payload),
   operationStatusChange: (id: string, status: string, reason = "") =>
     apiPost<PurchaseOperation>(`/purchase-operations/${id}/status_change/`, { status, reason }),
   operationPrint: (id: string, payload: Record<string, unknown>) => apiPost<Record<string, unknown>>(`/purchase-operations/${id}/print_ticket/`, payload),
   ticketItems: () => apiList<TicketItem>("/ticket-items/"),
+  ticketItemsByOperation: (operationId: string) => apiListAll<TicketItem>(`/ticket-items/?operation=${encodeURIComponent(operationId)}`),
   createTicketItem: (payload: Record<string, unknown>) => apiPost<TicketItem>("/ticket-items/", payload),
   updateTicketItem: (id: string, payload: Record<string, unknown>) => apiPut<TicketItem>(`/ticket-items/${id}/`, payload),
   adjustTicketItem: (id: string, payload: Record<string, unknown>) => apiPost<TicketItem>(`/ticket-items/${id}/adjust/`, payload),

@@ -1,20 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
+import { TicketViewer } from "../components/TicketViewer";
 import type { CollectionCenter, Device, Material, MaterialFamily, Party, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle } from "../types";
 
 type LiveReading = {
   weight_kg: string;
   is_stable: boolean;
-  is_manual_fallback: boolean;
   raw_value: string;
   captured_at: string;
 };
 
-type WeighStep = "idle" | "gross" | "tare" | "done";
-
 const POLL_MS = 1800;
-
 const MERMA_PCT = 0.03;
 
 function fmtKg(v: number) {
@@ -24,33 +21,48 @@ function fmtMXN(v: number) {
   return "$" + v.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+type EditState = {
+  itemId: string;
+  materialId: string;
+  unitPrice: string;
+  mermaKg: string;
+  grossKg: string;
+  tareKg: string;
+  method: string;
+};
+
 export function PurchasePage() {
   const [centers, setCenters] = useState<CollectionCenter[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [families, setFamilies] = useState<MaterialFamily[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
 
   const [centerId, setCenterId] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [vehicleId, setVehicleId] = useState("");
+
+  const [plateInput, setPlateInput] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [customerVehicles, setCustomerVehicles] = useState<Vehicle[]>([]);
+  const [allVehicles, setAllVehicles] = useState<Vehicle[]>([]);
+  const [vehicleLoading, setVehicleLoading] = useState(false);
+
   const [operation, setOperation] = useState<PurchaseOperation | null>(null);
   const [opLoading, setOpLoading] = useState(false);
   const [opError, setOpError] = useState<string | null>(null);
 
   const [familyFilter, setFamilyFilter] = useState("");
   const [materialId, setMaterialId] = useState("");
-  const [method, setMethod] = useState<TicketItem["method"]>("vehicle_differential");
+  const [method, setMethod] = useState<string>("vehicle_differential");
   const [unitPrice, setUnitPrice] = useState("0");
   const [priceSuggestion, setPriceSuggestion] = useState<PriceSuggestion | null>(null);
   const [mermaKg, setMermaKg] = useState("");
 
   const [grossKg, setGrossKg] = useState("");
-  const [tareKg, setTareKg] = useState("");
   const [manualGross, setManualGross] = useState("");
   const [manualTare, setManualTare] = useState("");
-  const [weighStep, setWeighStep] = useState<WeighStep>("idle");
+  const [diffStep, setDiffStep] = useState<"idle" | "gross" | "cycling">("idle");
+  const [diffRefKg, setDiffRefKg] = useState("");
 
   const [liveReading, setLiveReading] = useState<LiveReading | null>(null);
   const [autoRead, setAutoRead] = useState(false);
@@ -59,6 +71,8 @@ export function PurchasePage() {
   const [items, setItems] = useState<TicketItem[]>([]);
   const [itemLoading, setItemLoading] = useState(false);
   const [itemMsg, setItemMsg] = useState<string | null>(null);
+
+  const [editState, setEditState] = useState<EditState | null>(null);
 
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -70,34 +84,50 @@ export function PurchasePage() {
       api.parties().then(setParties),
       api.materials().then(setMaterials),
       api.materialFamilies().then(setFamilies),
-      api.vehicles().then(setVehicles),
+      api.vehicles().then(setAllVehicles),
       api.devices().then(setDevices),
     ]).catch(() => {});
   }, []);
 
   useEffect(() => {
-    const collectionCenters = centers.filter((c) => c.kind === "collection");
-    if (collectionCenters.length === 1 && !centerId) setCenterId(collectionCenters[0].id);
+    const cs = centers.filter((c) => c.kind === "collection");
+    if (cs.length === 1 && !centerId) setCenterId(cs[0].id);
   }, [centers]);
+
+  useEffect(() => {
+    if (!customerId) { setCustomerVehicles([]); return; }
+    setVehicleLoading(true);
+    api.vehiclesByOwner(customerId)
+      .then((vs) => setCustomerVehicles(vs as Vehicle[]))
+      .catch(() => setCustomerVehicles([]))
+      .finally(() => setVehicleLoading(false));
+  }, [customerId]);
 
   const collectionCenters = useMemo(() => centers.filter((c) => c.kind === "collection"), [centers]);
   const center = useMemo(() => centers.find((c) => c.id === centerId), [centers, centerId]);
 
+  const plateSuggestions = useMemo(() => {
+    const q = plateInput.trim().toLowerCase();
+    if (!q) return customerVehicles;
+    return customerVehicles.filter(
+      (v) => v.plate_number.toLowerCase().includes(q) || v.label.toLowerCase().includes(q)
+    );
+  }, [customerVehicles, plateInput]);
+
   const scaleDevice = useMemo(() => {
     const kind = method === "vehicle_differential" ? "vehicle_scale" : "secondary_scale";
-    return devices.find((d) => d.kind === kind && (d.collection_center === centerId || !d.collection_center))
-      ?? devices.find((d) => d.kind === kind)
-      ?? null;
+    return (
+      devices.find((d) => d.kind === kind && d.collection_center === centerId) ??
+      devices.find((d) => d.kind === kind) ??
+      null
+    );
   }, [devices, method, centerId]);
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (!autoRead || !scaleDevice) return;
     const poll = async () => {
-      try {
-        const r = await api.deviceSimulateScale(scaleDevice.id);
-        setLiveReading(r);
-      } catch { }
+      try { setLiveReading(await api.deviceSimulateScale(scaleDevice.id)); } catch { }
     };
     poll();
     pollRef.current = setInterval(poll, POLL_MS);
@@ -106,19 +136,11 @@ export function PurchasePage() {
 
   const priceLookupSeq = useRef(0);
   useEffect(() => {
-    if (!centerId || !materialId) {
-      setPriceSuggestion(null);
-      return;
-    }
+    if (!centerId || !materialId) { setPriceSuggestion(null); return; }
     const seq = ++priceLookupSeq.current;
-    api.priceSuggestion(centerId, materialId).then((s) => {
-      if (seq !== priceLookupSeq.current) return;
-      setPriceSuggestion(s);
-      setUnitPrice(s.unit_price ?? "0");
-    }).catch(() => {
-      if (seq !== priceLookupSeq.current) return;
-      setPriceSuggestion(null);
-    });
+    api.priceSuggestion(centerId, materialId)
+      .then((s) => { if (seq !== priceLookupSeq.current) return; setPriceSuggestion(s); setUnitPrice(s.unit_price ?? "0"); })
+      .catch(() => { if (seq !== priceLookupSeq.current) return; setPriceSuggestion(null); });
   }, [centerId, materialId]);
 
   const filteredMaterials = useMemo(() => {
@@ -126,50 +148,83 @@ export function PurchasePage() {
     return materials.filter((m) => m.family === familyFilter);
   }, [materials, familyFilter]);
 
-  const familyById = useMemo(() => new Map(families.map((f) => [f.id, f.name])), [families]);
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
+  const vehicleById = useMemo(() => new Map(allVehicles.map((v) => [v.id, v])), [allVehicles]);
+  const partyById = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
 
-  const grossNum = parseFloat(method !== "manual_contingency" ? (grossKg || "0") : (manualGross || "0")) || 0;
-  const tareNum = parseFloat(method === "vehicle_differential" ? (tareKg || "0") : (manualTare || "0")) || 0;
-  const netRaw = Math.max(0, grossNum - tareNum);
+  const isDisc = liveReading?.raw_value === "DISCONNECTED";
+  const liveStable = !!liveReading?.is_stable && !isDisc;
+  const displayWeight = liveReading && !isDisc ? parseFloat(liveReading.weight_kg) : null;
+  const totalWeight = parseFloat(operation?.total_weight_kg ?? "0") || 0;
+  const totalAmount = parseFloat(operation?.total_amount ?? "0") || 0;
+
+  const refKgNum = parseFloat(diffRefKg) || 0;
+  const liveNum = displayWeight ?? 0;
+
+  const netRaw = (() => {
+    if (method === "vehicle_differential" && diffStep === "cycling") return Math.max(0, refKgNum - liveNum);
+    if (method === "manual_contingency") return Math.max(0, (parseFloat(manualGross) || 0) - (parseFloat(manualTare) || 0));
+    if (method === "secondary_direct" && grossKg) return parseFloat(grossKg) || 0;
+    return 0;
+  })();
   const mermaNum = parseFloat(mermaKg) || netRaw * MERMA_PCT;
   const netClean = Math.max(0, netRaw - mermaNum);
   const priceNum = parseFloat(unitPrice) || 0;
-  const amount = netClean * priceNum;
+  const estimatedAmount = netClean * priceNum;
 
-  const canCapture = !!customerId && !!materialId && !!scaleDevice && method !== "manual_contingency";
-  const weighOk =
-    method === "manual_contingency"
-      ? !!manualGross
-      : method === "vehicle_differential"
-      ? !!grossKg && !!tareKg
-      : !!grossKg;
-  const canAddItem = !!operation && !!materialId && weighOk && netClean > 0;
+  const hasScale = !!scaleDevice;
+  const canReadScale = !!operation && hasScale && method !== "manual_contingency";
+  const canCaptureGross = canReadScale && diffStep === "idle" && liveStable && !confirmed;
+  const canCaptureMaterial = canReadScale && diffStep === "cycling" && !!materialId && liveStable && !confirmed;
+  const canCaptureDirect = canReadScale && method === "secondary_direct" && !!materialId && liveStable && !confirmed;
 
-  function captureReading(slot: "gross" | "tare") {
-    if (!liveReading) return;
-    if (!liveReading.is_stable) { setItemMsg("Espera a que la lectura se estabilice."); return; }
-    if (slot === "gross") { setGrossKg(liveReading.weight_kg); setWeighStep("tare"); }
-    else { setTareKg(liveReading.weight_kg); setWeighStep("done"); }
-    setItemMsg(null);
+  const canAddItemManual = !!operation && !!materialId && method === "manual_contingency" && !!manualGross && netClean > 0 && !confirmed;
+  const canAddItemDirect = !!operation && !!materialId && method === "secondary_direct" && !!grossKg && netClean > 0 && !confirmed;
+
+  function captureGross() {
+    if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable."); return; }
+    setDiffRefKg(liveReading.weight_kg);
+    setDiffStep("cycling");
+    setItemMsg(`Peso inicial capturado: ${fmtKg(parseFloat(liveReading.weight_kg))} kg. Selecciona el material y captura la tara.`);
   }
 
   function captureDirectReading() {
-    if (!liveReading) return;
-    if (!liveReading.is_stable) { setItemMsg("Espera lectura estable."); return; }
+    if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable."); return; }
     setGrossKg(liveReading.weight_kg);
-    setWeighStep("done");
     setItemMsg(null);
+  }
+
+  async function resolveVehicleId(): Promise<string | null> {
+    const plate = plateInput.trim().toUpperCase();
+    if (!plate) return null;
+
+    const existing = [...allVehicles, ...customerVehicles].find(
+      (v) => v.plate_number.toUpperCase() === plate
+    );
+    if (existing) return existing.id;
+
+    const created = await api.vehicleCreate({
+      plate_number: plate,
+      label: plate,
+      owner: customerId || null,
+      capacity_kg: "0",
+      expected_km_per_liter: "3",
+      is_active: true,
+    });
+    setAllVehicles((prev) => [...prev, created]);
+    setCustomerVehicles((prev) => [...prev, created]);
+    return created.id;
   }
 
   async function openOperation() {
     if (!centerId || !customerId) { setOpError("Selecciona centro y cliente."); return; }
     setOpLoading(true); setOpError(null);
     try {
+      const resolvedVehicleId = await resolveVehicleId();
       const op = await api.operationCreate({
         collection_center_id: centerId,
         customer_id: customerId,
-        vehicle_id: vehicleId || null,
+        vehicle_id: resolvedVehicleId,
       });
       setOperation(op);
       setItems([]);
@@ -177,24 +232,61 @@ export function PurchasePage() {
       setPrintMsg(null);
       resetWeigh();
     } catch (e) {
-      setOpError(e instanceof Error ? e.message : "Error al crear la operación.");
+      setOpError(e instanceof Error ? e.message : "Error al crear la operación o el vehículo.");
     } finally {
       setOpLoading(false);
     }
   }
 
   function resetWeigh() {
-    setGrossKg(""); setTareKg(""); setManualGross(""); setManualTare("");
-    setMermaKg(""); setWeighStep("idle"); setLiveReading(null); setAutoRead(false);
+    setGrossKg(""); setDiffRefKg(""); setManualGross(""); setManualTare("");
+    setMermaKg(""); setDiffStep("idle"); setLiveReading(null); setAutoRead(false);
     setItemMsg(null);
   }
 
-  async function addItem() {
-    if (!operation || !canAddItem) return;
+  function resetForNextMaterial() {
+    setMaterialId(""); setMermaKg("");
+    setItemMsg("Partida registrada. Selecciona el siguiente material y captura la tara.");
+  }
+
+  async function addItemDiff() {
+    if (!operation || !canCaptureMaterial) return;
     setItemLoading(true); setItemMsg(null);
     try {
-      const gross = method === "manual_contingency" ? manualGross : grossKg;
-      const tare = method === "vehicle_differential" ? tareKg : (method === "manual_contingency" ? (manualTare || "0") : "0");
+      const tare = liveReading!.weight_kg;
+      const item = await api.createTicketItem({
+        operation: operation.id,
+        material: materialId,
+        method,
+        gross_weight_kg: diffRefKg,
+        tare_weight_kg: tare,
+        merma_kg: mermaNum.toFixed(3),
+        unit_price: unitPrice,
+        notes: "",
+      });
+      setItems((prev) => [...prev, item]);
+      const refreshed = await api.operationDetail(operation.id);
+      setOperation(refreshed);
+      setDiffRefKg(tare);
+      resetForNextMaterial();
+    } catch (e) {
+      setItemMsg(e instanceof Error ? e.message : "Error al guardar la partida.");
+    } finally {
+      setItemLoading(false);
+    }
+  }
+
+  async function addItem() {
+    if (!operation) return;
+    setItemLoading(true); setItemMsg(null);
+    try {
+      let gross: string;
+      let tare: string;
+      if (method === "manual_contingency") {
+        gross = manualGross; tare = manualTare || "0";
+      } else {
+        gross = grossKg; tare = "0";
+      }
       const item = await api.createTicketItem({
         operation: operation.id,
         material: materialId,
@@ -212,6 +304,62 @@ export function PurchasePage() {
       setItemMsg("Partida registrada correctamente.");
     } catch (e) {
       setItemMsg(e instanceof Error ? e.message : "Error al guardar la partida.");
+    } finally {
+      setItemLoading(false);
+    }
+  }
+
+  async function deleteItem(itemId: string) {
+    if (!window.confirm("¿Eliminar esta partida?")) return;
+    setItemLoading(true);
+    try {
+      await api.deleteTicketItem(itemId);
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+      if (operation) {
+        const refreshed = await api.operationDetail(operation.id);
+        setOperation(refreshed);
+      }
+      setItemMsg("Partida eliminada.");
+    } catch (e) {
+      setItemMsg(e instanceof Error ? e.message : "Error al eliminar la partida.");
+    } finally {
+      setItemLoading(false);
+    }
+  }
+
+  function startEditItem(item: TicketItem) {
+    setEditState({
+      itemId: item.id,
+      materialId: item.material,
+      unitPrice: item.unit_price,
+      mermaKg: item.merma_kg,
+      grossKg: item.gross_weight_kg,
+      tareKg: item.tare_weight_kg,
+      method: item.method,
+    });
+  }
+
+  async function saveEditItem() {
+    if (!editState || !operation) return;
+    setItemLoading(true);
+    try {
+      const updated = await api.updateTicketItem(editState.itemId, {
+        operation: operation.id,
+        material: editState.materialId,
+        method: editState.method,
+        gross_weight_kg: editState.grossKg,
+        tare_weight_kg: editState.tareKg,
+        merma_kg: editState.mermaKg,
+        unit_price: editState.unitPrice,
+        notes: "",
+      });
+      setItems((prev) => prev.map((i) => i.id === editState.itemId ? updated : i));
+      const refreshed = await api.operationDetail(operation.id);
+      setOperation(refreshed);
+      setEditState(null);
+      setItemMsg("Partida actualizada.");
+    } catch (e) {
+      setItemMsg(e instanceof Error ? e.message : "Error al actualizar. La partida puede ya haber sido impresa.");
     } finally {
       setItemLoading(false);
     }
@@ -250,31 +398,34 @@ export function PurchasePage() {
   function startNew() {
     setOperation(null); setItems([]);
     setConfirmed(false); setPrintMsg(null);
-    setCustomerId(""); setVehicleId("");
+    setCustomerId(""); setPlateInput(""); setCustomerVehicles([]);
     resetWeigh();
     setMaterialId(""); setFamilyFilter("");
+    setEditState(null);
   }
 
-  const isDisconnected = liveReading?.raw_value === "DISCONNECTED";
-  const isStable = liveReading?.is_stable && !isDisconnected;
-  const displayWeight = liveReading && !isDisconnected ? parseFloat(liveReading.weight_kg) : null;
-  const totalWeight = parseFloat(operation?.total_weight_kg ?? "0") || 0;
-  const totalAmount = parseFloat(operation?.total_amount ?? "0") || 0;
+  const operationVehicle = useMemo(() => {
+    if (!operation?.vehicle) return null;
+    return vehicleById.get(operation.vehicle) ?? null;
+  }, [operation, vehicleById]);
+
+  const operationCustomer = useMemo(() => {
+    if (!operation?.customer) return null;
+    return partyById.get(operation.customer) ?? null;
+  }, [operation, partyById]);
 
   return (
     <Page title="Compra de materiales">
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
 
-        {/* ── LEFT COLUMN ────────────────────── */}
+        {/* ── LEFT COLUMN ─────────────────────────────────────── */}
         <div style={{ display: "grid", gap: 16 }}>
 
           {/* Step 1: Operation setup */}
           <div className="section-panel">
             <div className="section-panel-header">
               <h3>① Datos de la compra</h3>
-              {operation && (
-                <span className="badge badge-green">Folio: {operation.folio}</span>
-              )}
+              {operation && <span className="badge badge-green">Folio: {operation.folio}</span>}
             </div>
             <div className="section-panel-body" style={{ display: "grid", gap: 12 }}>
               {collectionCenters.length > 1 && (
@@ -282,42 +433,77 @@ export function PurchasePage() {
                   Centro de acopio
                   <select value={centerId} onChange={(e) => setCenterId(e.target.value)} disabled={!!operation}>
                     <option value="">Seleccionar…</option>
-                    {collectionCenters.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+                    {collectionCenters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </label>
               )}
               {center && collectionCenters.length <= 1 && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span className="badge badge-blue">🏭 {center.name}</span>
-                </div>
+                <div><span className="badge badge-blue">🏭 {center.name}</span></div>
               )}
+
               <label>
                 Cliente / Proveedor <span style={{ color: "var(--danger)" }}>*</span>
                 <select
                   value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
+                  onChange={(e) => { setCustomerId(e.target.value); setPlateInput(""); }}
                   disabled={!!operation}
                   style={{ borderColor: !customerId ? "rgba(239,68,68,0.5)" : undefined }}
                 >
                   <option value="">— Seleccionar cliente —</option>
-                  {parties.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.trade_name || p.legal_name}
-                    </option>
-                  ))}
+                  {parties.map((p) => <option key={p.id} value={p.id}>{p.trade_name || p.legal_name}</option>)}
                 </select>
               </label>
-              <label>
-                Vehículo (opcional)
-                <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} disabled={!!operation}>
-                  <option value="">Sin vehículo</option>
-                  {vehicles.map((v) => (
-                    <option key={v.id} value={v.id}>{v.plate_number} — {v.label}</option>
-                  ))}
-                </select>
+
+              {/* Plate input with customer-scoped autocomplete */}
+              <label style={{ position: "relative" }}>
+                Placa del vehículo (opcional)
+                <input
+                  type="text"
+                  value={plateInput}
+                  placeholder={
+                    !customerId ? "Selecciona cliente primero" :
+                    vehicleLoading ? "Cargando…" :
+                    customerVehicles.length > 0 ? `${customerVehicles.length} vehículo(s) registrados — escribe la placa` :
+                    "Escribe la placa (nueva o existente)"
+                  }
+                  disabled={!!operation || !customerId}
+                  onChange={(e) => { setPlateInput(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  autoComplete="off"
+                />
+                {showSuggestions && !operation && customerId && plateSuggestions.length > 0 && (
+                  <div style={{
+                    position: "absolute", zIndex: 10, left: 0, right: 0, top: "100%",
+                    background: "var(--panel)", border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                    maxHeight: 200, overflowY: "auto",
+                  }}>
+                    {plateSuggestions.map((v) => (
+                      <div
+                        key={v.id}
+                        style={{ padding: "8px 12px", cursor: "pointer", fontSize: "0.85rem" }}
+                        onMouseDown={() => { setPlateInput(v.plate_number); setShowSuggestions(false); }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                      >
+                        <span style={{ fontWeight: 600 }}>{v.plate_number}</span>
+                        {v.label && v.label !== v.plate_number && (
+                          <span style={{ color: "var(--muted)", marginLeft: 8 }}>— {v.label}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {plateInput && !operation && (
+                  <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 3 }}>
+                    {[...allVehicles, ...customerVehicles].find((v) => v.plate_number.toUpperCase() === plateInput.trim().toUpperCase())
+                      ? "✓ Vehículo existente"
+                      : "⚠ Placa nueva — se creará al iniciar la compra"}
+                  </div>
+                )}
               </label>
+
               {opError && <div className="error-banner">{opError}</div>}
               {!operation ? (
                 <button
@@ -331,13 +517,9 @@ export function PurchasePage() {
               ) : (
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   <span className={`badge ${confirmed ? "badge-green" : "badge-amber"}`}>
-                    {confirmed ? "Operación confirmada ✓" : `Estado: ${operation.status}`}
+                    {confirmed ? "Confirmada ✓" : `Estado: ${operation.status}`}
                   </span>
-                  {!confirmed && (
-                    <button className="btn-ghost" onClick={startNew}>
-                      Nueva compra
-                    </button>
-                  )}
+                  {!confirmed && <button className="btn-ghost" onClick={startNew}>Nueva compra</button>}
                 </div>
               )}
             </div>
@@ -347,11 +529,7 @@ export function PurchasePage() {
           <div className="section-panel" style={{ opacity: !operation ? 0.5 : 1, pointerEvents: !operation ? "none" : undefined }}>
             <div className="section-panel-header">
               <h3>② Pesaje y captura</h3>
-              {scaleDevice && (
-                <span className="badge badge-gray" style={{ fontSize: "0.7rem" }}>
-                  {scaleDevice.name}
-                </span>
-              )}
+              {scaleDevice && <span className="badge badge-gray" style={{ fontSize: "0.7rem" }}>{scaleDevice.name}</span>}
             </div>
             <div className="section-panel-body" style={{ display: "grid", gap: 14 }}>
 
@@ -360,9 +538,7 @@ export function PurchasePage() {
                   Familia
                   <select value={familyFilter} onChange={(e) => { setFamilyFilter(e.target.value); setMaterialId(""); }}>
                     <option value="">Todas</option>
-                    {families.map((f) => (
-                      <option key={f.id} value={f.id}>{f.name}</option>
-                    ))}
+                    {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                   </select>
                 </label>
                 <label>
@@ -370,12 +546,10 @@ export function PurchasePage() {
                   <select
                     value={materialId}
                     onChange={(e) => setMaterialId(e.target.value)}
-                    style={{ borderColor: !materialId ? "rgba(239,68,68,0.5)" : undefined }}
+                    style={{ borderColor: !materialId && diffStep === "cycling" ? "rgba(239,68,68,0.5)" : undefined }}
                   >
                     <option value="">— Seleccionar —</option>
-                    {filteredMaterials.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
+                    {filteredMaterials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </label>
               </div>
@@ -383,7 +557,11 @@ export function PurchasePage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <label>
                   Método de pesaje
-                  <select value={method} onChange={(e) => { setMethod(e.target.value as TicketItem["method"]); resetWeigh(); }}>
+                  <select
+                    value={method}
+                    onChange={(e) => { setMethod(e.target.value); resetWeigh(); }}
+                    disabled={diffStep === "cycling"}
+                  >
                     <option value="vehicle_differential">⚖ Diferencia vehicular</option>
                     <option value="secondary_direct">🏋 Báscula directa</option>
                     <option value="manual_contingency">✏ Manual / contingencia</option>
@@ -392,16 +570,8 @@ export function PurchasePage() {
                 <label>
                   Precio unitario ($/kg)
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <input
-                      type="number"
-                      value={unitPrice}
-                      min={0}
-                      step={0.01}
-                      onChange={(e) => setUnitPrice(e.target.value)}
-                    />
-                    {priceSuggestion?.found && (
-                      <span className="badge badge-green" style={{ whiteSpace: "nowrap" }}>Lista ✓</span>
-                    )}
+                    <input type="number" value={unitPrice} min={0} step={0.01} onChange={(e) => setUnitPrice(e.target.value)} />
+                    {priceSuggestion?.found && <span className="badge badge-green" style={{ whiteSpace: "nowrap" }}>Lista ✓</span>}
                   </div>
                 </label>
               </div>
@@ -410,29 +580,24 @@ export function PurchasePage() {
               {method !== "manual_contingency" && (
                 <div>
                   <div className="scale-display">
-                    <div className={`scale-weight ${!isStable ? (isDisconnected ? "disconnected" : "unstable") : ""}`}>
+                    <div className={`scale-weight ${!liveStable ? (isDisc ? "disconnected" : "unstable") : ""}`}>
                       {displayWeight != null
                         ? displayWeight.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                         : "— — —"}
                     </div>
-                    <div className="scale-unit">
-                      {scaleDevice?.kind === "vehicle_scale" ? "kg (vehicular)" : "kg"}
-                    </div>
+                    <div className="scale-unit">{scaleDevice?.kind === "vehicle_scale" ? "kg (vehicular)" : "kg"}</div>
                     <div className="scale-status-row">
-                      <div className={`scale-dot ${!liveReading ? "disconnected" : isDisconnected ? "disconnected" : isStable ? "stable" : "unstable"}`} />
+                      <div className={`scale-dot ${!liveReading ? "disconnected" : isDisc ? "disconnected" : liveStable ? "stable" : "unstable"}`} />
                       <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
-                        {!liveReading ? "Sin lectura" : isDisconnected ? "Desconectada" : isStable ? "Estable ✓" : "Oscilando…"}
+                        {!liveReading ? "Sin lectura" : isDisc ? "Desconectada" : liveStable ? "Estable ✓" : "Oscilando…"}
                       </span>
                     </div>
                   </div>
 
                   <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                    {!canCapture && (
-                      <div className="info-banner" style={{ flex: 1, fontSize: "0.8rem" }}>
-                        Selecciona cliente y material para habilitar la báscula.
-                      </div>
-                    )}
-                    {canCapture && (
+                    {!hasScale ? (
+                      <div className="info-banner" style={{ flex: 1, fontSize: "0.8rem" }}>Sin báscula configurada.</div>
+                    ) : (
                       <>
                         <button
                           className={autoRead ? "btn-danger" : "btn-secondary"}
@@ -441,29 +606,36 @@ export function PurchasePage() {
                         >
                           {autoRead ? "⏹ Pausar báscula" : "▶ Leer báscula"}
                         </button>
-                        {method === "vehicle_differential" && (
-                          <>
-                            <button
-                              className={weighStep === "idle" || weighStep === "tare" ? "btn-primary" : "btn-secondary"}
-                              style={{ flex: 1 }}
-                              disabled={!isStable || weighStep === "done"}
-                              onClick={() => captureReading(weighStep === "tare" ? "tare" : "gross")}
-                              title={weighStep === "tare" ? "Capturar peso tara (camión vacío)" : "Capturar peso bruto (camión cargado)"}
-                            >
-                              {weighStep === "tare" ? "⬇ Capturar tara" : "⬆ Capturar bruto"}
-                            </button>
-                            {weighStep !== "idle" && (
-                              <button className="btn-ghost" onClick={() => { setWeighStep("idle"); setGrossKg(""); setTareKg(""); }}>
-                                ↺
-                              </button>
-                            )}
-                          </>
+
+                        {method === "vehicle_differential" && diffStep === "idle" && (
+                          <button
+                            className="btn-primary"
+                            style={{ flex: 1 }}
+                            disabled={!canCaptureGross}
+                            onClick={captureGross}
+                            title="Captura el peso inicial (vehículo cargado). No necesitas seleccionar material todavía."
+                          >
+                            ⬆ Capturar peso inicial
+                          </button>
                         )}
+
+                        {method === "vehicle_differential" && diffStep === "cycling" && (
+                          <button
+                            className="btn-primary"
+                            style={{ flex: 1 }}
+                            disabled={!canCaptureMaterial || itemLoading}
+                            onClick={addItemDiff}
+                            title="Captura la tara del vehículo tras descargar el material y registra la partida"
+                          >
+                            {itemLoading ? "Guardando…" : "⬇ Tara + agregar partida"}
+                          </button>
+                        )}
+
                         {method === "secondary_direct" && (
                           <button
                             className="btn-primary"
                             style={{ flex: 1 }}
-                            disabled={!isStable}
+                            disabled={!canCaptureDirect && !!materialId}
                             onClick={captureDirectReading}
                           >
                             ✓ Capturar lectura
@@ -475,31 +647,65 @@ export function PurchasePage() {
                 </div>
               )}
 
-              {/* Differential step indicator */}
+              {/* Differential step indicators */}
               {method === "vehicle_differential" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ display: "grid", gap: 8 }}>
                   <div style={{
                     padding: "10px 14px", borderRadius: "var(--radius-sm)",
-                    background: weighStep === "idle" || weighStep === "gross" ? "var(--accent-dim)" : "var(--panel-2)",
-                    border: `1px solid ${weighStep === "idle" || weighStep === "gross" ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
+                    background: diffStep === "idle" ? "var(--accent-dim)" : "var(--panel-2)",
+                    border: `1px solid ${diffStep === "idle" ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
                   }}>
-                    <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Paso 1 — Bruto</div>
-                    <div style={{ fontSize: "1.2rem", fontWeight: 700, color: grossKg ? "var(--text)" : "var(--muted)", marginTop: 4 }}>
-                      {grossKg ? `${fmtKg(parseFloat(grossKg))} kg` : "Pendiente"}
+                    <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Paso 1 — Peso inicial (vehículo cargado)
                     </div>
-                    {!grossKg && <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 2 }}>Camión cargado</div>}
-                  </div>
-                  <div style={{
-                    padding: "10px 14px", borderRadius: "var(--radius-sm)",
-                    background: weighStep === "tare" ? "var(--accent-dim)" : "var(--panel-2)",
-                    border: `1px solid ${weighStep === "tare" ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
-                  }}>
-                    <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Paso 2 — Tara</div>
-                    <div style={{ fontSize: "1.2rem", fontWeight: 700, color: tareKg ? "var(--text)" : "var(--muted)", marginTop: 4 }}>
-                      {tareKg ? `${fmtKg(parseFloat(tareKg))} kg` : "Pendiente"}
+                    <div style={{ fontSize: "1.2rem", fontWeight: 700, color: diffRefKg ? "var(--text)" : "var(--muted)", marginTop: 4 }}>
+                      {diffRefKg ? `${fmtKg(parseFloat(diffRefKg))} kg` : "Pendiente — no es necesario seleccionar material"}
                     </div>
-                    {!tareKg && <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 2 }}>Camión vacío</div>}
                   </div>
+
+                  {diffStep === "cycling" && (
+                    <div style={{
+                      padding: "10px 14px", borderRadius: "var(--radius-sm)",
+                      background: "var(--accent-dim)",
+                      border: "1px solid rgba(34,197,94,0.3)",
+                    }}>
+                      <div style={{ fontSize: "0.7rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Paso 2 — Tara de material actual
+                      </div>
+                      <div style={{ fontSize: "0.82rem", color: "var(--muted)", marginTop: 4 }}>
+                        Referencia: <strong style={{ color: "var(--text)" }}>{fmtKg(refKgNum)} kg</strong>
+                        {displayWeight != null && (
+                          <span style={{ marginLeft: 12 }}>
+                            Actual: <strong style={{ color: liveStable ? "var(--accent)" : "var(--warning)" }}>
+                              {fmtKg(displayWeight)} kg
+                            </strong>
+                          </span>
+                        )}
+                      </div>
+                      {displayWeight != null && diffRefKg && (
+                        <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--accent)", marginTop: 4 }}>
+                          Neto estimado: {fmtKg(Math.max(0, refKgNum - displayWeight))} kg
+                          {materialId && priceNum > 0 && (
+                            <span style={{ color: "var(--accent-2)", marginLeft: 12 }}>
+                              ≈ {fmtMXN(Math.max(0, refKgNum - displayWeight - (Math.max(0, refKgNum - displayWeight) * MERMA_PCT)) * priceNum)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!materialId && (
+                        <div style={{ fontSize: "0.75rem", color: "var(--warning)", marginTop: 6 }}>
+                          Selecciona el material antes de capturar la tara.
+                        </div>
+                      )}
+                      <button
+                        className="btn-ghost"
+                        style={{ marginTop: 8, fontSize: "0.75rem" }}
+                        onClick={() => { setDiffStep("idle"); setDiffRefKg(""); setMaterialId(""); setMermaKg(""); setItemMsg(null); }}
+                      >
+                        ↺ Reiniciar ciclo
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -517,71 +723,53 @@ export function PurchasePage() {
                 </div>
               )}
 
-              {/* Net weight calculation */}
-              {netClean > 0 && (
+              {/* Net weight preview (non-differential) */}
+              {netClean > 0 && method !== "vehicle_differential" && (
                 <div style={{
                   padding: "14px 16px", borderRadius: "var(--radius-sm)",
-                  background: "rgba(34,197,94,0.08)",
-                  border: "1px solid rgba(34,197,94,0.2)",
-                  display: "grid", gap: 6,
+                  background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", display: "grid", gap: 6,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem" }}>
-                    <span style={{ color: "var(--muted)" }}>Bruto</span>
-                    <span>{fmtKg(grossNum)} kg</span>
-                  </div>
-                  {(method === "vehicle_differential" || (method === "manual_contingency" && tareNum > 0)) && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem" }}>
-                      <span style={{ color: "var(--muted)" }}>Tara</span>
-                      <span>− {fmtKg(tareNum)} kg</span>
-                    </div>
-                  )}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem" }}>
                     <label style={{ textTransform: "none", display: "flex", gap: 8, alignItems: "center", color: "var(--muted)" }}>
-                      Merma (%)
-                      <input
-                        type="number"
-                        value={mermaKg || mermaNum.toFixed(3)}
-                        min={0}
-                        step={0.001}
+                      Merma (kg)
+                      <input type="number" value={mermaKg || mermaNum.toFixed(3)} min={0} step={0.001}
                         onChange={(e) => setMermaKg(e.target.value)}
-                        style={{ width: 80, padding: "4px 8px", fontSize: "0.8rem" }}
-                      />
+                        style={{ width: 80, padding: "4px 8px", fontSize: "0.8rem" }} />
                     </label>
                     <span>− {fmtKg(mermaNum)} kg</span>
                   </div>
                   <div style={{ borderTop: "1px solid rgba(34,197,94,0.2)", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--accent)" }}>Peso neto</span>
-                    <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em" }}>
-                      {fmtKg(netClean)} kg
-                    </span>
+                    <span style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em" }}>{fmtKg(netClean)} kg</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem", fontWeight: 600 }}>
                     <span style={{ color: "var(--muted)" }}>Precio × neto</span>
-                    <span style={{ color: "var(--accent-2)" }}>{fmtMXN(amount)}</span>
+                    <span style={{ color: "var(--accent-2)" }}>{fmtMXN(estimatedAmount)}</span>
                   </div>
                 </div>
               )}
 
               {itemMsg && (
-                <div className={itemMsg.includes("Error") || itemMsg.includes("error") ? "error-banner" : "info-banner"}>
+                <div className={itemMsg.toLowerCase().includes("error") ? "error-banner" : "info-banner"}>
                   {itemMsg}
                 </div>
               )}
 
-              <button
-                className="btn-primary"
-                disabled={!canAddItem || itemLoading || confirmed}
-                onClick={addItem}
-                style={{ fontSize: "1rem", padding: "12px" }}
-              >
-                {itemLoading ? "Guardando…" : `+ Agregar partida${netClean > 0 ? ` — ${fmtKg(netClean)} kg · ${fmtMXN(amount)}` : ""}`}
-              </button>
-
+              {method !== "vehicle_differential" && (
+                <button
+                  className="btn-primary"
+                  disabled={(!canAddItemManual && !canAddItemDirect) || itemLoading || confirmed}
+                  onClick={addItem}
+                  style={{ fontSize: "1rem", padding: "12px" }}
+                >
+                  {itemLoading ? "Guardando…" : `+ Agregar partida${netClean > 0 ? ` — ${fmtKg(netClean)} kg · ${fmtMXN(estimatedAmount)}` : ""}`}
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* ── RIGHT COLUMN ────────────────────── */}
+        {/* ── RIGHT COLUMN ─────────────────────────────────────── */}
         <div style={{ display: "grid", gap: 16 }}>
 
           {/* Items table */}
@@ -594,103 +782,129 @@ export function PurchasePage() {
               <div style={{ padding: "24px 20px", textAlign: "center" }}>
                 <div style={{ fontSize: "2rem", marginBottom: 8 }}>⚖</div>
                 <p className="muted" style={{ margin: 0 }}>
-                  {!operation
-                    ? "Inicia una compra para registrar partidas."
-                    : "Aún no hay partidas. Captura el peso de los materiales."}
+                  {!operation ? "Inicia una compra para registrar partidas." : "Aún no hay partidas."}
                 </p>
               </div>
             ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Material</th>
-                    <th>Método</th>
-                    <th>Neto (kg)</th>
-                    <th>Precio</th>
-                    <th>Importe</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr key={item.id}>
-                      <td style={{ fontWeight: 500, color: "var(--text)" }}>
-                        {materialById.get(item.material)?.name ?? item.material}
-                      </td>
-                      <td>
-                        <span className="badge badge-gray" style={{ fontSize: "0.68rem" }}>
-                          {item.method === "vehicle_differential" ? "Diferencial" : item.method === "secondary_direct" ? "Directo" : "Manual"}
-                        </span>
-                      </td>
-                      <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                        {fmtKg(parseFloat(item.net_weight_kg))}
-                      </td>
-                      <td style={{ color: "var(--muted)" }}>
-                        {fmtMXN(parseFloat(item.unit_price))}
-                      </td>
-                      <td style={{ fontWeight: 700, color: "var(--accent-2)" }}>
-                        {fmtMXN(parseFloat(item.amount))}
-                      </td>
+              <>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Material</th>
+                      <th>Método</th>
+                      <th>Neto (kg)</th>
+                      <th>Precio</th>
+                      <th>Importe</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-
-            {items.length > 0 && (
-              <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", background: "var(--panel-2)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                    {items.length} partida{items.length !== 1 ? "s" : ""} · {fmtKg(totalWeight)} kg
-                  </span>
-                  <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--accent-2)" }}>
-                    {fmtMXN(totalAmount)}
-                  </span>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <tr key={item.id}>
+                        <td style={{ fontWeight: 500 }}>{materialById.get(item.material)?.name ?? item.material}</td>
+                        <td>
+                          <span className="badge badge-gray" style={{ fontSize: "0.68rem" }}>
+                            {item.method === "vehicle_differential" ? "Diferencial" : item.method === "secondary_direct" ? "Directo" : "Manual"}
+                          </span>
+                        </td>
+                        <td style={{ fontVariantNumeric: "tabular-nums" }}>{fmtKg(parseFloat(item.net_weight_kg))}</td>
+                        <td style={{ color: "var(--muted)" }}>{fmtMXN(parseFloat(item.unit_price))}</td>
+                        <td style={{ fontWeight: 700, color: "var(--accent-2)" }}>{fmtMXN(parseFloat(item.amount))}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {!confirmed && (
+                            <div style={{ display: "flex", gap: 4 }}>
+                              <button className="btn-ghost" style={{ fontSize: "0.72rem", padding: "3px 8px" }}
+                                onClick={() => startEditItem(item)} title="Editar partida">✏</button>
+                              <button className="btn-ghost" style={{ fontSize: "0.72rem", padding: "3px 8px", color: "var(--danger)" }}
+                                onClick={() => deleteItem(item.id)} title="Eliminar partida" disabled={itemLoading}>🗑</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", background: "var(--panel-2)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                      {items.length} partida{items.length !== 1 ? "s" : ""} · {fmtKg(totalWeight)} kg
+                    </span>
+                    <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--accent-2)" }}>{fmtMXN(totalAmount)}</span>
+                  </div>
                 </div>
-              </div>
+              </>
             )}
           </div>
 
-          {/* Confirm & Print */}
-          {operation && items.length > 0 && (
+          {/* Edit item panel */}
+          {editState && (
             <div className="section-panel">
               <div className="section-panel-header">
-                <h3>④ Cerrar compra</h3>
+                <h3>Editar partida</h3>
+                <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={() => setEditState(null)}>✕ Cancelar</button>
               </div>
               <div className="section-panel-body" style={{ display: "grid", gap: 10 }}>
-                {printMsg && (
-                  <div className={printMsg.includes("Error") ? "error-banner" : "info-banner"}>
-                    {printMsg}
-                  </div>
+                <label>
+                  Material
+                  <select value={editState.materialId} onChange={(e) => setEditState((s) => s && ({ ...s, materialId: e.target.value }))}>
+                    {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <label>Peso bruto (kg)<input type="number" value={editState.grossKg} onChange={(e) => setEditState((s) => s && ({ ...s, grossKg: e.target.value }))} /></label>
+                  <label>Peso tara (kg)<input type="number" value={editState.tareKg} onChange={(e) => setEditState((s) => s && ({ ...s, tareKg: e.target.value }))} /></label>
+                  <label>Merma (kg)<input type="number" value={editState.mermaKg} onChange={(e) => setEditState((s) => s && ({ ...s, mermaKg: e.target.value }))} /></label>
+                  <label>Precio ($/kg)<input type="number" value={editState.unitPrice} onChange={(e) => setEditState((s) => s && ({ ...s, unitPrice: e.target.value }))} /></label>
+                </div>
+                {itemMsg && itemMsg.toLowerCase().includes("error") && (
+                  <div className="error-banner">{itemMsg}</div>
                 )}
-                {confirmed ? (
-                  <>
-                    <div className="info-banner">
-                      Compra confirmada. Folio: <strong>{operation.folio}</strong>
-                    </div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button className="btn-primary" style={{ flex: 1 }} onClick={printTicket}>
-                        🖨 Imprimir ticket
-                      </button>
-                      <button className="btn-secondary" style={{ flex: 1 }} onClick={startNew}>
-                        Nueva compra
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                      Revisa las partidas antes de confirmar. Una vez confirmada no se pueden agregar más partidas sin ajuste auditado.
-                    </div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button className="btn-primary" style={{ flex: 1 }} onClick={confirmOp} disabled={confirming}>
-                        {confirming ? "Confirmando…" : "✓ Confirmar compra"}
-                      </button>
-                      <button className="btn-secondary" onClick={printTicket}>
-                        🖨 Ticket provisional
-                      </button>
-                    </div>
-                  </>
-                )}
+                <button className="btn-primary" onClick={saveEditItem} disabled={itemLoading}>
+                  {itemLoading ? "Guardando…" : "Guardar cambios"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Confirm section */}
+          {operation && items.length > 0 && !confirmed && (
+            <div className="section-panel">
+              <div className="section-panel-header"><h3>④ Cerrar compra</h3></div>
+              <div className="section-panel-body" style={{ display: "grid", gap: 10 }}>
+                <div style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                  Revisa las partidas antes de confirmar. Una vez confirmada no se pueden agregar más partidas sin ajuste auditado.
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button className="btn-primary" style={{ flex: 1 }} onClick={confirmOp} disabled={confirming || itemLoading}>
+                    {confirming ? "Confirmando…" : "✓ Confirmar compra"}
+                  </button>
+                  <button className="btn-secondary" onClick={printTicket}>🖨 Ticket provisional</button>
+                </div>
+                {printMsg && <div className="info-banner">{printMsg}</div>}
+              </div>
+            </div>
+          )}
+
+          {/* Ticket on confirm */}
+          {confirmed && operation && (
+            <div className="section-panel">
+              <div className="section-panel-header">
+                <h3>✓ Compra confirmada</h3>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn-secondary" style={{ fontSize: "0.8rem" }} onClick={printTicket}>🖨 Imprimir</button>
+                  <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={startNew}>Nueva compra</button>
+                </div>
+              </div>
+              <div className="section-panel-body" style={{ paddingTop: 12 }}>
+                {printMsg && <div className="info-banner" style={{ marginBottom: 12 }}>{printMsg}</div>}
+                <TicketViewer
+                  operation={operation}
+                  items={items}
+                  center={center ?? null}
+                  customer={operationCustomer}
+                  vehicle={operationVehicle}
+                  materialById={materialById}
+                />
               </div>
             </div>
           )}
@@ -700,11 +914,10 @@ export function PurchasePage() {
             <div className="section-panel">
               <div className="section-panel-header"><h3>Cómo usar</h3></div>
               <div className="section-panel-body" style={{ display: "grid", gap: 8, fontSize: "0.82rem", color: "var(--muted)" }}>
-                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>①</strong> Selecciona el cliente y opcionalmente el vehículo, luego presiona <strong style={{ color: "var(--text-soft)" }}>Iniciar compra</strong>.</p>
-                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>②</strong> Elige el <strong style={{ color: "var(--text-soft)" }}>material</strong> y el <strong style={{ color: "var(--text-soft)" }}>método</strong>. La báscula se habilita automáticamente.</p>
-                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>③</strong> Activa la báscula con <strong style={{ color: "var(--text-soft)" }}>▶ Leer báscula</strong> y captura la lectura estable.</p>
-                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>④</strong> Presiona <strong style={{ color: "var(--text-soft)" }}>+ Agregar partida</strong> por cada tipo de material. Repite para todos los materiales.</p>
-                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>⑤</strong> Confirma la compra e imprime el ticket.</p>
+                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>①</strong> Selecciona cliente. Escribe la placa (se sugieren las del cliente; si es nueva se crea automáticamente). Presiona <strong style={{ color: "var(--text-soft)" }}>Iniciar compra</strong>.</p>
+                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>②</strong> Para <em>Diferencia vehicular</em>: captura el peso inicial con el vehículo cargado (sin seleccionar material). Luego por cada material, selecciónalo, regresa el vehículo y presiona <strong style={{ color: "var(--text-soft)" }}>Tara + agregar partida</strong>.</p>
+                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>③</strong> Edita o elimina partidas con los botones de cada fila.</p>
+                <p style={{ margin: 0 }}><strong style={{ color: "var(--text-soft)" }}>④</strong> Al confirmar, aparece el ticket completo en pantalla.</p>
               </div>
             </div>
           )}

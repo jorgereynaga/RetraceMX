@@ -45,12 +45,52 @@ async function requestList<T>(path: string): Promise<T[]> {
   return payload.results ?? [];
 }
 
+type PagedResponse<T> = T[] | { results?: T[]; next?: string | null };
+
+function apiBasePath(): string {
+  try {
+    return new URL(API_BASE).pathname;
+  } catch {
+    return API_BASE;
+  }
+}
+
+async function requestListAll<T>(initialPath: string): Promise<T[]> {
+  const all: T[] = [];
+  let currentPath: string | null = initialPath;
+  const basePath: string = apiBasePath();
+  while (currentPath !== null) {
+    const payload: PagedResponse<T> = await request<PagedResponse<T>>(currentPath);
+    if (Array.isArray(payload)) {
+      all.push(...payload);
+      break;
+    }
+    all.push(...(payload.results ?? []));
+    if (payload.next) {
+      try {
+        const url: URL = new URL(payload.next);
+        const fullPath: string = url.pathname + url.search;
+        currentPath = fullPath.startsWith(basePath) ? fullPath.slice(basePath.length) : fullPath;
+      } catch {
+        currentPath = null;
+      }
+    } else {
+      currentPath = null;
+    }
+  }
+  return all;
+}
+
 export function apiGet<T>(path: string) {
   return request<T>(path);
 }
 
 export function apiList<T>(path: string) {
   return requestList<T>(path);
+}
+
+export function apiListAll<T>(path: string) {
+  return requestListAll<T>(path);
 }
 
 export function apiPost<T>(path: string, body: unknown) {
