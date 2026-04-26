@@ -850,6 +850,12 @@ export function PurchasePage() {
                               <span className={`badge ${session.status === "open" ? "badge-amber" : "badge-green"}`} style={{ fontSize: "0.68rem" }}>
                                 {session.status === "open" ? "Abierta" : "Cerrada"}
                               </span>
+                              {session.status !== "open" && session.ended_at && (
+                                <div style={{ fontSize: "0.68rem", color: "var(--muted)", marginTop: 2, whiteSpace: "nowrap" }}>
+                                  {new Date(session.ended_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" })}{" "}
+                                  {new Date(session.ended_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
