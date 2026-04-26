@@ -176,7 +176,7 @@ export function PurchasePage() {
     if (method === "secondary_direct" && grossKg) return parseFloat(grossKg) || 0;
     return 0;
   })();
-  const mermaNum = parseFloat(mermaKg) || netRaw * MERMA_PCT;
+  const mermaNum = mermaKg !== "" && !isNaN(parseFloat(mermaKg)) ? parseFloat(mermaKg) : netRaw * MERMA_PCT;
   const netClean = Math.max(0, netRaw - mermaNum);
   const priceNum = parseFloat(unitPrice) || 0;
   const estimatedAmount = netClean * priceNum;
@@ -909,16 +909,32 @@ export function PurchasePage() {
                         ) : null}
                       </div>
                       {capturedTareKg && netClean > 0 && (
-                        <div style={{ marginTop: 8, display: "flex", gap: 16, alignItems: "baseline" }}>
-                          <span style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--accent)" }}>{fmtKg(netClean)} kg neto</span>
-                          {priceNum > 0 && <span style={{ color: "var(--accent-2)", fontWeight: 600 }}>{fmtMXN(estimatedAmount)}</span>}
-                          <button
-                            className="btn-ghost"
-                            style={{ fontSize: "0.72rem", padding: "2px 8px" }}
-                            onClick={() => { setCapturedTareKg(""); setItemMsg(null); }}
-                          >
-                            ↺ Recapturar
-                          </button>
+                        <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: "0.82rem", color: "var(--muted)" }}>
+                            <label style={{ display: "flex", gap: 6, alignItems: "center", textTransform: "none", margin: 0 }}>
+                              Merma (kg)
+                              <input
+                                type="number"
+                                value={mermaKg !== "" ? mermaKg : mermaNum.toFixed(3)}
+                                min={0}
+                                step={0.001}
+                                onChange={(e) => setMermaKg(e.target.value)}
+                                style={{ width: 80, padding: "4px 8px", fontSize: "0.8rem" }}
+                              />
+                            </label>
+                            <span style={{ color: "var(--muted)" }}>({((mermaNum / netRaw) * 100).toFixed(1)}%)</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 16, alignItems: "baseline" }}>
+                            <span style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--accent)" }}>{fmtKg(netClean)} kg neto</span>
+                            {priceNum > 0 && <span style={{ color: "var(--accent-2)", fontWeight: 600 }}>{fmtMXN(estimatedAmount)}</span>}
+                            <button
+                              className="btn-ghost"
+                              style={{ fontSize: "0.72rem", padding: "2px 8px" }}
+                              onClick={() => { setCapturedTareKg(""); setMermaKg(""); setItemMsg(null); }}
+                            >
+                              ↺ Recapturar
+                            </button>
+                          </div>
                         </div>
                       )}
                       {!materialId && (
@@ -966,7 +982,7 @@ export function PurchasePage() {
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem" }}>
                     <label style={{ textTransform: "none", display: "flex", gap: 8, alignItems: "center", color: "var(--muted)" }}>
                       Merma (kg)
-                      <input type="number" value={mermaKg || mermaNum.toFixed(3)} min={0} step={0.001}
+                      <input type="number" value={mermaKg !== "" ? mermaKg : mermaNum.toFixed(3)} min={0} step={0.001}
                         onChange={(e) => setMermaKg(e.target.value)}
                         style={{ width: 80, padding: "4px 8px", fontSize: "0.8rem" }} />
                     </label>
