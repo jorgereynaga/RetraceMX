@@ -3,8 +3,11 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.auditing.models import AuditLog
+from apps.devices.models import Device
+from apps.weighing.models import WeighingSession
 from apps.commercialization.models import SaleOrder
 from apps.commercialization.services import add_sale_item, close_sale_order, register_sale_order
 from apps.evidence.services import register_print_event
@@ -288,3 +291,103 @@ def test_trip_incident_must_be_resolved_before_close():
     change_trip_status(trip, "arrived", user=user, notes="Arribo a destino")
     closed = close_collection_trip(trip=trip, user=user, notes="Ruta finalizada")
     assert closed.status == "closed"
+
+
+def _build_scale_device(center):
+    return Device.objects.create(
+        name="Bascula Vehicular",
+        identifier="scale-test-001",
+        kind=Device.Kind.VEHICLE_SCALE,
+        collection_center=center,
+    )
+
+
+def _build_open_weighing_session(center, operation, device):
+    return WeighingSession.objects.create(
+        collection_center=center,
+        operation=operation,
+        device=device,
+        kind=WeighingSession.Kind.VEHICLE,
+    )
+
+
+def test_confirming_operation_closes_open_weighing_sessions():
+    user, center, customer, material, operation = build_context()
+    device = _build_scale_device(center)
+    session = _build_open_weighing_session(center, operation, device)
+
+    assert session.status == "open"
+    assert session.ended_at is None
+
+    change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user)
+
+    session.refresh_from_db()
+    assert session.status == "closed"
+    assert session.ended_at is not None
+
+
+def test_cancelling_operation_closes_open_weighing_sessions():
+    user, center, customer, material, operation = build_context()
+    device = _build_scale_device(center)
+    session = _build_open_weighing_session(center, operation, device)
+
+    assert session.status == "open"
+
+    change_operation_status(operation, PurchaseOperation.Status.CANCELLED, user=user)
+
+    session.refresh_from_db()
+    assert session.status == "closed"
+    assert session.ended_at is not None
+
+
+def test_completing_operation_closes_open_weighing_sessions():
+    user, center, customer, material, operation = build_context()
+    device = _build_scale_device(center)
+
+    register_ticket_item(
+        operation=operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("10.00"),
+        gross_weight_kg=Decimal("10"),
+        merma_kg=Decimal("0"),
+        user=user,
+    )
+    change_operation_status(operation, PurchaseOperation.Status.REGISTERED, user=user)
+    session = _build_open_weighing_session(center, operation, device)
+
+    assert session.status == "open"
+    assert session.ended_at is None
+
+    register_payment(operation=operation, amount=Decimal("100.00"), method="cash", received_by=user)
+    change_operation_status(operation, PurchaseOperation.Status.COMPLETED, user=user)
+
+    session.refresh_from_db()
+    assert session.status == "closed"
+    assert session.ended_at is not None
+
+
+def test_already_closed_sessions_are_not_double_updated():
+    user, center, customer, material, operation = build_context()
+    device = _build_scale_device(center)
+    session = _build_open_weighing_session(center, operation, device)
+
+    original_ended_at = timezone.now()
+    WeighingSession.objects.filter(pk=session.pk).update(status="closed", ended_at=original_ended_at)
+
+    change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user)
+
+    session.refresh_from_db()
+    assert session.status == "closed"
+    assert session.ended_at == original_ended_at
+
+
+def test_operation_with_no_sessions_changes_status_normally():
+    user, center, customer, material, operation = build_context()
+
+    assert not operation.weighing_sessions.exists()
+
+    change_operation_status(operation, PurchaseOperation.Status.CANCELLED, user=user)
+
+    operation.refresh_from_db()
+    assert operation.status == PurchaseOperation.Status.CANCELLED
