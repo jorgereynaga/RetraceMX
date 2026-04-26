@@ -197,6 +197,11 @@ export function PurchasePage() {
   const effectiveMermaPct = selectedMaterial?.default_merma_pct != null
     ? parseFloat(selectedMaterial.default_merma_pct)
     : MERMA_PCT;
+  const mermaSourceLabel = selectedMaterial
+    ? (selectedMaterial.default_merma_pct != null
+        ? `Default del material: ${(parseFloat(selectedMaterial.default_merma_pct) * 100).toFixed(1)}%`
+        : `Default global: ${(MERMA_PCT * 100).toFixed(0)}%`)
+    : null;
   const mermaNum = mermaKg !== "" && !isNaN(parseFloat(mermaKg)) ? parseFloat(mermaKg) : netRaw * effectiveMermaPct;
   const netClean = Math.max(0, netRaw - mermaNum);
   const priceNum = parseFloat(unitPrice) || 0;
@@ -1275,6 +1280,11 @@ export function PurchasePage() {
                               />
                             </label>
                             <span style={{ color: "var(--muted)" }}>({((mermaNum / netRaw) * 100).toFixed(1)}%)</span>
+                            {mermaSourceLabel && (
+                              <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontStyle: "italic", marginLeft: 4 }}>
+                                {mermaSourceLabel}
+                              </span>
+                            )}
                           </div>
                           <div style={{ display: "flex", gap: 16, alignItems: "baseline" }}>
                             <span style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--accent)" }}>{fmtKg(netClean)} kg neto</span>
@@ -1358,6 +1368,11 @@ export function PurchasePage() {
                       <input type="number" value={mermaKg !== "" ? mermaKg : mermaNum.toFixed(3)} min={0} step={0.001}
                         onChange={(e) => setMermaKg(e.target.value)}
                         style={{ width: 80, padding: "4px 8px", fontSize: "0.8rem" }} />
+                      {mermaSourceLabel && (
+                        <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontStyle: "italic" }}>
+                          {mermaSourceLabel}
+                        </span>
+                      )}
                     </label>
                     <span>− {fmtKg(mermaNum)} kg</span>
                   </div>
