@@ -149,6 +149,8 @@ export function HistoryPage() {
                     <th>Cliente</th>
                     <th>Placa</th>
                     <th>Centro</th>
+                    <th>Encargado</th>
+                    <th>Conductor</th>
                     <th>Estado</th>
                     <th style={{ textAlign: "right" }}>Total</th>
                   </tr>
@@ -173,6 +175,8 @@ export function HistoryPage() {
                         <td style={{ fontWeight: 500 }}>{customer?.trade_name ?? customer?.legal_name ?? "—"}</td>
                         <td>{vehicle?.plate_number ?? "—"}</td>
                         <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{center?.name ?? "—"}</td>
+                        <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.opened_by_name ?? "—"}</td>
+                        <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.driver_name ?? "—"}</td>
                         <td>
                           <span className={`badge ${op.status === "confirmed" || op.status === "completed" ? "badge-green" : op.status === "cancelled" ? "badge-red" : "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
                             {STATUS_LABELS[op.status] ?? op.status}
@@ -186,7 +190,7 @@ export function HistoryPage() {
                   })}
                   {paginated.items.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
+                      <td colSpan={9} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
                         Sin resultados
                       </td>
                     </tr>
