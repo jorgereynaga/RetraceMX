@@ -88,6 +88,10 @@ export function PurchasePage() {
 
   const [vehicleHistory, setVehicleHistory] = useState<WeighingSession[]>([]);
   const [vehicleHistoryLoading, setVehicleHistoryLoading] = useState(false);
+  const [historyDateFrom, setHistoryDateFrom] = useState("");
+  const [historyDateTo, setHistoryDateTo] = useState("");
+  const [historyDisplayCount, setHistoryDisplayCount] = useState(10);
+  const HISTORY_PAGE_SIZE = 10;
 
   useEffect(() => {
     Promise.all([
@@ -523,18 +527,27 @@ export function PurchasePage() {
   }, [operation, plateInput, allVehicles, customerVehicles]);
 
   useEffect(() => {
+    setHistoryDateFrom("");
+    setHistoryDateTo("");
+  }, [selectedVehicleId]);
+
+  useEffect(() => {
     if (!selectedVehicleId) { setVehicleHistory([]); return; }
     setVehicleHistoryLoading(true);
-    api.weighingSessionsByVehicle(selectedVehicleId)
+    setHistoryDisplayCount(HISTORY_PAGE_SIZE);
+    api.weighingSessionsByVehicle(selectedVehicleId, {
+      dateFrom: historyDateFrom || undefined,
+      dateTo: historyDateTo || undefined,
+    })
       .then((sessions) => {
         const sorted = [...sessions].sort(
           (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
         );
-        setVehicleHistory(sorted.slice(0, 5));
+        setVehicleHistory(sorted);
       })
       .catch(() => setVehicleHistory([]))
       .finally(() => setVehicleHistoryLoading(false));
-  }, [selectedVehicleId]);
+  }, [selectedVehicleId, historyDateFrom, historyDateTo]);
 
   const operationCustomer = useMemo(() => {
     if (!operation?.customer) return null;
@@ -803,66 +816,108 @@ export function PurchasePage() {
                   : <span className="badge badge-gray">{vehicleHistory.length} sesión{vehicleHistory.length !== 1 ? "es" : ""}</span>
                 }
               </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", padding: "10px 20px 0", flexWrap: "wrap" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: "0.78rem", margin: 0 }}>
+                  Desde
+                  <input
+                    type="date"
+                    value={historyDateFrom}
+                    onChange={(e) => setHistoryDateFrom(e.target.value)}
+                    style={{ fontSize: "0.78rem", padding: "3px 7px" }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: "0.78rem", margin: 0 }}>
+                  Hasta
+                  <input
+                    type="date"
+                    value={historyDateTo}
+                    onChange={(e) => setHistoryDateTo(e.target.value)}
+                    style={{ fontSize: "0.78rem", padding: "3px 7px" }}
+                  />
+                </label>
+                {(historyDateFrom || historyDateTo) && (
+                  <button
+                    className="btn-ghost"
+                    style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                    onClick={() => { setHistoryDateFrom(""); setHistoryDateTo(""); }}
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
               {vehicleHistory.length === 0 && !vehicleHistoryLoading ? (
                 <div style={{ padding: "12px 20px", color: "var(--muted)", fontSize: "0.82rem" }}>
-                  Sin sesiones de pesaje previas para este vehículo.
+                  Sin sesiones de pesaje{(historyDateFrom || historyDateTo) ? " en el período seleccionado" : " previas"} para este vehículo.
                 </div>
               ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="table" style={{ fontSize: "0.8rem" }}>
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Folio op.</th>
-                        <th>Bruto (kg)</th>
-                        <th>Tara (kg)</th>
-                        <th>Neto (kg)</th>
-                        <th>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {vehicleHistory.map((session) => {
-                        const grossReading = session.readings.find((r) => r.reading_type === "gross");
-                        const tareReading = session.readings.find((r) => r.reading_type === "tare");
-                        const grossKgVal = parseFloat(grossReading?.gross_weight_kg ?? "0") || 0;
-                        const tareKgVal = parseFloat(tareReading?.tare_weight_kg ?? "0") || 0;
-                        const netKgVal = grossKgVal > 0 && tareKgVal > 0 ? Math.max(0, grossKgVal - tareKgVal) : null;
-                        const dateStr = new Date(session.started_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" });
-                        const timeStr = new Date(session.started_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
-                        return (
-                          <tr key={session.id}>
-                            <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                              {dateStr} {timeStr}
-                            </td>
-                            <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
-                              {session.operation_folio ?? "—"}
-                            </td>
-                            <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                              {grossKgVal > 0 ? fmtKg(grossKgVal) : "—"}
-                            </td>
-                            <td style={{ fontVariantNumeric: "tabular-nums" }}>
-                              {tareKgVal > 0 ? fmtKg(tareKgVal) : "—"}
-                            </td>
-                            <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: netKgVal !== null ? 600 : undefined }}>
-                              {netKgVal !== null ? fmtKg(netKgVal) : "—"}
-                            </td>
-                            <td>
-                              <span className={`badge ${session.status === "open" ? "badge-amber" : "badge-green"}`} style={{ fontSize: "0.68rem" }}>
-                                {session.status === "open" ? "Abierta" : "Cerrada"}
-                              </span>
-                              {session.status !== "open" && session.ended_at && (
-                                <div style={{ fontSize: "0.68rem", color: "var(--muted)", marginTop: 2, whiteSpace: "nowrap" }}>
-                                  {new Date(session.ended_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" })}{" "}
-                                  {new Date(session.ended_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="table" style={{ fontSize: "0.8rem" }}>
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Folio op.</th>
+                          <th>Bruto (kg)</th>
+                          <th>Tara (kg)</th>
+                          <th>Neto (kg)</th>
+                          <th>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {vehicleHistory.slice(0, historyDisplayCount).map((session) => {
+                          const grossReading = session.readings.find((r) => r.reading_type === "gross");
+                          const tareReading = session.readings.find((r) => r.reading_type === "tare");
+                          const grossKgVal = parseFloat(grossReading?.gross_weight_kg ?? "0") || 0;
+                          const tareKgVal = parseFloat(tareReading?.tare_weight_kg ?? "0") || 0;
+                          const netKgVal = grossKgVal > 0 && tareKgVal > 0 ? Math.max(0, grossKgVal - tareKgVal) : null;
+                          const dateStr = new Date(session.started_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" });
+                          const timeStr = new Date(session.started_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+                          return (
+                            <tr key={session.id}>
+                              <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                                {dateStr} {timeStr}
+                              </td>
+                              <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                                {session.operation_folio ?? "—"}
+                              </td>
+                              <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                                {grossKgVal > 0 ? fmtKg(grossKgVal) : "—"}
+                              </td>
+                              <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                                {tareKgVal > 0 ? fmtKg(tareKgVal) : "—"}
+                              </td>
+                              <td style={{ fontVariantNumeric: "tabular-nums", fontWeight: netKgVal !== null ? 600 : undefined }}>
+                                {netKgVal !== null ? fmtKg(netKgVal) : "—"}
+                              </td>
+                              <td>
+                                <span className={`badge ${session.status === "open" ? "badge-amber" : "badge-green"}`} style={{ fontSize: "0.68rem" }}>
+                                  {session.status === "open" ? "Abierta" : "Cerrada"}
+                                </span>
+                                {session.status !== "open" && session.ended_at && (
+                                  <div style={{ fontSize: "0.68rem", color: "var(--muted)", marginTop: 2, whiteSpace: "nowrap" }}>
+                                    {new Date(session.ended_at).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "2-digit" })}{" "}
+                                    {new Date(session.ended_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {vehicleHistory.length > historyDisplayCount && (
+                    <div style={{ padding: "10px 20px" }}>
+                      <button
+                        className="btn-ghost"
+                        style={{ fontSize: "0.8rem", width: "100%" }}
+                        onClick={() => setHistoryDisplayCount((c) => c + HISTORY_PAGE_SIZE)}
+                      >
+                        Cargar más ({vehicleHistory.length - historyDisplayCount} restantes)
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

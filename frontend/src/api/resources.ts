@@ -120,7 +120,12 @@ export const api = {
       `/price-suggestion/?collection_center_id=${encodeURIComponent(collectionCenterId)}&material_id=${encodeURIComponent(materialId)}`,
     ),
   deviceSimulateScale: (deviceId: string) => apiGet<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; captured_at: string }>(`/devices/${deviceId}/simulate_scale/`),
-  weighingSessionsByVehicle: (vehicleId: string) => apiListAll<WeighingSession>(`/weighing-sessions/?vehicle=${encodeURIComponent(vehicleId)}`),
+  weighingSessionsByVehicle: (vehicleId: string, params?: { dateFrom?: string; dateTo?: string }) => {
+    const query = new URLSearchParams({ vehicle: vehicleId });
+    if (params?.dateFrom) query.set("date_from", params.dateFrom);
+    if (params?.dateTo) query.set("date_to", params.dateTo);
+    return apiListAll<WeighingSession>(`/weighing-sessions/?${query.toString()}`);
+  },
   createScaleReading: (payload: Record<string, unknown>) => apiPost<ScaleReading>("/scale-readings/", payload),
   evidenceFiles: () => apiList<EvidenceFile>("/evidence-files/"),
   evidenceFileUpload: (formData: FormData) => apiPostFormData<EvidenceFile>("/evidence-files/", formData),

@@ -1,3 +1,4 @@
+import django_filters
 from rest_framework import status, viewsets
 from rest_framework.response import Response
 
@@ -7,10 +8,20 @@ from .serializers import ScaleReadingSerializer, WeighingSessionSerializer
 from .services import register_scale_reading
 
 
+class WeighingSessionFilter(django_filters.FilterSet):
+    vehicle = django_filters.UUIDFilter(field_name="vehicle")
+    date_from = django_filters.DateFilter(field_name="started_at__date", lookup_expr="gte")
+    date_to = django_filters.DateFilter(field_name="started_at__date", lookup_expr="lte")
+
+    class Meta:
+        model = WeighingSession
+        fields = ["vehicle", "date_from", "date_to"]
+
+
 class WeighingSessionViewSet(viewsets.ModelViewSet):
     queryset = WeighingSession.objects.select_related("collection_center", "operation", "device").prefetch_related("readings").all()
     serializer_class = WeighingSessionSerializer
-    filterset_fields = ["vehicle"]
+    filterset_class = WeighingSessionFilter
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
