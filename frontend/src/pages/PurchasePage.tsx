@@ -182,7 +182,11 @@ export function PurchasePage() {
     if (method === "secondary_direct" && grossKg) return parseFloat(grossKg) || 0;
     return 0;
   })();
-  const mermaNum = mermaKg !== "" && !isNaN(parseFloat(mermaKg)) ? parseFloat(mermaKg) : netRaw * MERMA_PCT;
+  const selectedMaterial = materialId ? materialById.get(materialId) : undefined;
+  const effectiveMermaPct = selectedMaterial?.default_merma_pct != null
+    ? parseFloat(selectedMaterial.default_merma_pct)
+    : MERMA_PCT;
+  const mermaNum = mermaKg !== "" && !isNaN(parseFloat(mermaKg)) ? parseFloat(mermaKg) : netRaw * effectiveMermaPct;
   const netClean = Math.max(0, netRaw - mermaNum);
   const priceNum = parseFloat(unitPrice) || 0;
   const estimatedAmount = netClean * priceNum;
@@ -877,7 +881,7 @@ export function PurchasePage() {
                   Material <span style={{ color: "var(--danger)" }}>*</span>
                   <select
                     value={materialId}
-                    onChange={(e) => setMaterialId(e.target.value)}
+                    onChange={(e) => { setMaterialId(e.target.value); setMermaKg(""); }}
                     style={{ borderColor: !materialId && diffStep === "cycling" ? "rgba(239,68,68,0.5)" : undefined }}
                   >
                     <option value="">— Seleccionar —</option>

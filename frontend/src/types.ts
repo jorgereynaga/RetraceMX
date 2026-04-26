@@ -45,6 +45,7 @@ export type Material = {
   is_hazard_auxiliary: boolean;
   requires_special_review: boolean;
   is_active: boolean;
+  default_merma_pct: string | null;
 };
 
 export type Device = {

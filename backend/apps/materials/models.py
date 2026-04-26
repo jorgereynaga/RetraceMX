@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.core.models import UUIDTimeStampedModel
@@ -31,6 +32,10 @@ class Material(UUIDTimeStampedModel):
     is_hazard_auxiliary = models.BooleanField(default=False)
     requires_special_review = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    default_merma_pct = models.DecimalField(
+        max_digits=5, decimal_places=4, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(1)],
+    )
 
     def __str__(self) -> str:
         return self.name

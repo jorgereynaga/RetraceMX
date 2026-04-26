@@ -22,6 +22,7 @@ function emptyForm() {
     is_hazard_auxiliary: false,
     requires_special_review: false,
     is_active: true,
+    default_merma_pct: "",
   };
 }
 
@@ -83,6 +84,7 @@ export function MaterialsPage() {
         is_hazard_auxiliary: selectedMaterial.is_hazard_auxiliary,
         requires_special_review: selectedMaterial.requires_special_review,
         is_active: selectedMaterial.is_active,
+        default_merma_pct: selectedMaterial.default_merma_pct ?? "",
       });
     } else {
       setForm(emptyForm());
@@ -110,7 +112,7 @@ export function MaterialsPage() {
     event.preventDefault();
     setMessage(null);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         code: form.code,
         name: form.name,
         family: form.family,
@@ -119,6 +121,7 @@ export function MaterialsPage() {
         is_hazard_auxiliary: form.is_hazard_auxiliary,
         requires_special_review: form.requires_special_review,
         is_active: form.is_active,
+        default_merma_pct: form.default_merma_pct !== "" ? form.default_merma_pct : null,
       };
       if (selectedMaterial) {
         await api.materialUpdate(selectedMaterial.id, payload);
@@ -217,6 +220,18 @@ export function MaterialsPage() {
             <span>{form.is_active ? "Sí" : "No"}</span>
           </div>
         </label>
+        <label>
+          Merma por defecto
+          <input
+            type="number"
+            value={form.default_merma_pct}
+            onChange={(e) => updateField("default_merma_pct", e.target.value)}
+            placeholder="ej. 0.03 (3%)"
+            min={0}
+            max={1}
+            step={0.0001}
+          />
+        </label>
         <button type="submit">{selectedMaterial ? "Actualizar" : "Crear"} material</button>
         <button type="button" className="ghost-button" onClick={() => { setSelectedMaterialId(""); setForm(emptyForm()); }}>
           Limpiar
@@ -245,6 +260,7 @@ export function MaterialsPage() {
             <th><SortableHeader label="Valorizable" active={sortKey === "valuation"} direction={sortDirection} onClick={() => toggleSort("valuation")} /></th>
             <th><SortableHeader label="Revisión" active={sortKey === "review"} direction={sortDirection} onClick={() => toggleSort("review")} /></th>
             <th><SortableHeader label="Activo" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
+            <th>Merma %</th>
           </tr>
         </thead>
         <tbody>
@@ -261,6 +277,7 @@ export function MaterialsPage() {
               <td>{item.valuation_possible ? "Sí" : "No"}</td>
               <td>{item.requires_special_review ? "Sí" : "No"}</td>
               <td>{item.is_active ? "Sí" : "No"}</td>
+              <td>{item.default_merma_pct != null ? `${(parseFloat(item.default_merma_pct) * 100).toFixed(2)}%` : "3% (global)"}</td>
             </tr>
           ))}
         </tbody>
