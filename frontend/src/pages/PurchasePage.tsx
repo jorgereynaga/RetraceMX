@@ -79,6 +79,9 @@ export function PurchasePage() {
   const [confirmed, setConfirmed] = useState(false);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
 
+  const [todayOps, setTodayOps] = useState<PurchaseOperation[]>([]);
+  const [opsLoading, setOpsLoading] = useState(false);
+
   useEffect(() => {
     Promise.all([
       api.centers().then(setCenters),
@@ -88,6 +91,7 @@ export function PurchasePage() {
       api.vehicles().then(setAllVehicles),
       api.devices().then(setDevices),
     ]).catch(() => {});
+    loadTodayOps();
   }, []);
 
   useEffect(() => {
@@ -248,6 +252,7 @@ export function PurchasePage() {
       setConfirmed(false);
       setPrintMsg(null);
       resetWeigh();
+      loadTodayOps();
     } catch (e) {
       setOpError(e instanceof Error ? e.message : "Error al crear la operación o el vehículo.");
     } finally {
@@ -389,6 +394,7 @@ export function PurchasePage() {
       const refreshed = await api.operationDetail(operation.id);
       setOperation(refreshed);
       setConfirmed(true);
+      loadTodayOps();
     } catch (e) {
       setItemMsg(e instanceof Error ? e.message : "Error al confirmar.");
     } finally {
@@ -411,6 +417,39 @@ export function PurchasePage() {
     }
   }
 
+  async function loadTodayOps() {
+    setOpsLoading(true);
+    try {
+      const all = await api.operationsAll();
+      const todayStr = new Date().toLocaleDateString("en-CA");
+      const filtered = (all as PurchaseOperation[])
+        .filter((op) => op.created_at && new Date(op.created_at).toLocaleDateString("en-CA") === todayStr)
+        .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+      setTodayOps(filtered);
+    } catch {
+      setTodayOps([]);
+    } finally {
+      setOpsLoading(false);
+    }
+  }
+
+  async function selectExistingOp(op: PurchaseOperation) {
+    setOpError(null);
+    setOperation(op);
+    setConfirmed(op.status === "confirmed" || op.status === "completed" || op.status === "cancelled");
+    setPrintMsg(null);
+    setEditState(null);
+    resetWeigh();
+    setMaterialId(""); setFamilyFilter("");
+    setCenterId(op.collection_center);
+    setCustomerId(op.customer);
+    setItems([]);
+    try {
+      const opItems = await api.ticketItemsByOperation(op.id);
+      setItems(opItems as TicketItem[]);
+    } catch { }
+  }
+
   function startNew() {
     setOperation(null); setItems([]);
     setConfirmed(false); setPrintMsg(null);
@@ -418,6 +457,7 @@ export function PurchasePage() {
     resetWeigh();
     setMaterialId(""); setFamilyFilter("");
     setEditState(null);
+    loadTodayOps();
   }
 
   const operationVehicle = useMemo(() => {
@@ -430,8 +470,105 @@ export function PurchasePage() {
     return partyById.get(operation.customer) ?? null;
   }, [operation, partyById]);
 
+  const statusLabel: Record<string, string> = {
+    open: "Abierta",
+    confirmed: "Confirmada",
+    completed: "Completada",
+    cancelled: "Cancelada",
+  };
+  const statusBadge: Record<string, string> = {
+    open: "badge-amber",
+    confirmed: "badge-green",
+    completed: "badge-blue",
+    cancelled: "badge-gray",
+  };
+
   return (
     <Page title="Compra de materiales">
+
+      {/* ── Operaciones del día ─────────────────────────────── */}
+      <div className="section-panel" style={{ marginBottom: 20 }}>
+        <div className="section-panel-header">
+          <h3>Operaciones del día</h3>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {opsLoading && <span className="muted" style={{ fontSize: "0.8rem" }}>Cargando…</span>}
+            <span className="badge badge-gray">{todayOps.length} operación{todayOps.length !== 1 ? "es" : ""}</span>
+            <button className="btn-ghost" style={{ fontSize: "0.78rem", padding: "3px 10px" }} onClick={loadTodayOps} disabled={opsLoading}>
+              ↺ Actualizar
+            </button>
+            <button className="btn-primary" style={{ fontSize: "0.78rem", padding: "4px 14px" }} onClick={startNew}>
+              + Nueva compra
+            </button>
+          </div>
+        </div>
+        {todayOps.length === 0 ? (
+          <div style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "0.85rem" }}>
+            {opsLoading ? "Cargando operaciones del día…" : "No hay operaciones registradas hoy. Presiona Nueva compra para iniciar."}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 32 }}>#</th>
+                  <th>Folio</th>
+                  <th>Cliente</th>
+                  <th>Hora</th>
+                  <th>Estado</th>
+                  <th>Partidas</th>
+                  <th>Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {todayOps.map((op, idx) => {
+                  const isSelected = operation?.id === op.id;
+                  const customer = partyById.get(op.customer);
+                  const time = op.created_at ? new Date(op.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) : "—";
+                  const itemCount = (op as PurchaseOperation & { items?: unknown[] }).items?.length ?? "—";
+                  return (
+                    <tr
+                      key={op.id}
+                      style={{
+                        background: isSelected ? "var(--accent-dim)" : undefined,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => selectExistingOp(op)}
+                    >
+                      <td style={{ color: "var(--muted)", fontSize: "0.78rem" }}>{todayOps.length - idx}</td>
+                      <td style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                        {isSelected && <span style={{ color: "var(--accent)", marginRight: 6 }}>▶</span>}
+                        {op.folio}
+                      </td>
+                      <td>{customer?.trade_name || customer?.legal_name || "—"}</td>
+                      <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{time}</td>
+                      <td>
+                        <span className={`badge ${statusBadge[op.status] ?? "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
+                          {statusLabel[op.status] ?? op.status}
+                        </span>
+                      </td>
+                      <td style={{ color: "var(--muted)", textAlign: "center" }}>{itemCount}</td>
+                      <td style={{ fontWeight: 700, color: "var(--accent-2)", fontVariantNumeric: "tabular-nums" }}>
+                        {parseFloat(op.total_amount) > 0 ? fmtMXN(parseFloat(op.total_amount)) : "—"}
+                      </td>
+                      <td>
+                        <button
+                          className={isSelected ? "btn-secondary" : "btn-ghost"}
+                          style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                          onClick={(e) => { e.stopPropagation(); selectExistingOp(op); }}
+                        >
+                          {isSelected ? "Activa" : "Ver"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
 
         {/* ── LEFT COLUMN ─────────────────────────────────────── */}
