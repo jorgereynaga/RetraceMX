@@ -181,6 +181,9 @@ export function PurchasePage() {
   const displayWeight = liveReading && !isDisc ? parseFloat(liveReading.weight_kg) : null;
   const totalWeight = parseFloat(operation?.total_weight_kg ?? "0") || 0;
   const totalAmount = parseFloat(operation?.total_amount ?? "0") || 0;
+  const totalMermaKg = items.reduce((sum, item) => sum + (parseFloat(item.merma_kg) || 0), 0);
+  const totalCleanKg = totalWeight + totalMermaKg;
+  const totalMermaPct = totalCleanKg > 0 ? (totalMermaKg / totalCleanKg) * 100 : 0;
 
   const refKgNum = parseFloat(diffRefKg) || 0;
   const capturedTareNum = parseFloat(capturedTareKg) || 0;
@@ -1476,12 +1479,19 @@ export function PurchasePage() {
                     );})}
                   </tbody>
                 </table>
-                <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", background: "var(--panel-2)" }}>
+                <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", background: "var(--panel-2)", display: "grid", gap: 6 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
                       {items.length} partida{items.length !== 1 ? "s" : ""} · {fmtKg(totalWeight)} kg
                     </span>
                     <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--accent-2)" }}>{fmtMXN(totalAmount)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontSize: "0.78rem", color: totalMermaKg > 0 ? "var(--warning, #f59e0b)" : "var(--muted)" }}>Merma total</span>
+                    <span style={{ fontSize: "0.88rem", fontVariantNumeric: "tabular-nums", color: totalMermaKg > 0 ? "var(--warning, #f59e0b)" : "var(--muted)" }}>
+                      {fmtKg(totalMermaKg)} kg
+                      <span style={{ fontSize: "0.72rem", marginLeft: 4, opacity: 0.8 }}>({totalMermaPct.toFixed(1)}%)</span>
+                    </span>
                   </div>
                 </div>
               </>
