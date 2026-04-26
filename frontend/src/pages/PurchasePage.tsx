@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
 import { TicketViewer } from "../components/TicketViewer";
-import type { CollectionCenter, Device, Material, MaterialFamily, Party, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle, WeighingSession } from "../types";
+import type { CollectionCenter, Device, Driver, Material, MaterialFamily, Party, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle, WeighingSession } from "../types";
 
 type LiveReading = {
   weight_kg: string;
@@ -37,6 +37,8 @@ export function PurchasePage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [families, setFamilies] = useState<MaterialFamily[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [driverId, setDriverId] = useState("");
 
   const [centerId, setCenterId] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -95,6 +97,7 @@ export function PurchasePage() {
       api.materialFamilies().then(setFamilies),
       api.vehicles().then(setAllVehicles),
       api.devices().then(setDevices),
+      api.drivers().then(setDrivers),
     ]).catch(() => {});
     loadTodayOps();
   }, []);
@@ -251,6 +254,7 @@ export function PurchasePage() {
         collection_center_id: centerId,
         customer_id: customerId,
         vehicle_id: resolvedVehicleId,
+        driver_id: driverId || null,
       });
       setOperation(op);
       setItems([]);
@@ -480,6 +484,7 @@ export function PurchasePage() {
     setMaterialId(""); setFamilyFilter("");
     setCenterId(op.collection_center);
     setCustomerId(op.customer);
+    setDriverId(op.driver ?? "");
     setItems([]);
     try {
       const opItems = await api.ticketItemsByOperation(op.id);
@@ -491,6 +496,7 @@ export function PurchasePage() {
     setOperation(null); setItems([]);
     setConfirmed(false); setPrintMsg(null);
     setCustomerId(""); setPlateInput(""); setCustomerVehicles([]);
+    setDriverId("");
     resetWeigh();
     setMaterialId(""); setFamilyFilter("");
     setEditState(null);
@@ -745,6 +751,19 @@ export function PurchasePage() {
                       : "⚠ Placa nueva — se creará al iniciar la compra"}
                   </div>
                 )}
+              </label>
+
+              <label>
+                Conductor (opcional)
+                <select value={driverId} onChange={(e) => setDriverId(e.target.value)} disabled={!!operation}>
+                  <option value="">— Sin conductor asignado —</option>
+                  {drivers.filter((d) => d.is_active !== false).map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.person_name ?? d.license_number ?? d.id}
+                      {d.person_name && d.license_number ? ` (Lic: ${d.license_number})` : ""}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               {opError && <div className="error-banner">{opError}</div>}

@@ -22,9 +22,16 @@ class VehicleSerializer(serializers.ModelSerializer):
 
 
 class DriverSerializer(serializers.ModelSerializer):
+    person_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Driver
         fields = "__all__"
+
+    def get_person_name(self, obj):
+        if obj.person:
+            return str(obj.person)
+        return None
 
 
 class CollectionCenterSerializer(serializers.ModelSerializer):

@@ -30,7 +30,9 @@ export type Vehicle = {
 export type Driver = {
   id: string;
   person: string;
+  person_name: string | null;
   license_number: string;
+  is_active: boolean;
 };
 
 export type Material = {
