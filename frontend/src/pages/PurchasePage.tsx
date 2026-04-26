@@ -81,6 +81,8 @@ export function PurchasePage() {
 
   const [todayOps, setTodayOps] = useState<PurchaseOperation[]>([]);
   const [opsLoading, setOpsLoading] = useState(false);
+  const [opsPage, setOpsPage] = useState(0);
+  const OPS_PAGE_SIZE = 3;
 
   useEffect(() => {
     Promise.all([
@@ -422,10 +424,12 @@ export function PurchasePage() {
     try {
       const all = await api.operationsAll();
       const todayStr = new Date().toLocaleDateString("en-CA");
-      const filtered = (all as PurchaseOperation[])
+      const unique = [...new Map((all as PurchaseOperation[]).map((op) => [op.id, op])).values()];
+      const filtered = unique
         .filter((op) => op.created_at && new Date(op.created_at).toLocaleDateString("en-CA") === todayStr)
         .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
       setTodayOps(filtered);
+      setOpsPage(0);
     } catch {
       setTodayOps([]);
     } finally {
@@ -503,70 +507,99 @@ export function PurchasePage() {
         </div>
         {todayOps.length === 0 ? (
           <div style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "0.85rem" }}>
-            {opsLoading ? "Cargando operaciones del día…" : "No hay operaciones registradas hoy. Presiona Nueva compra para iniciar."}
+            {opsLoading ? "Cargando operaciones del día…" : "No hay operaciones registradas hoy. Presiona + Nueva compra para iniciar."}
           </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 32 }}>#</th>
-                  <th>Folio</th>
-                  <th>Cliente</th>
-                  <th>Hora</th>
-                  <th>Estado</th>
-                  <th>Partidas</th>
-                  <th>Total</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {todayOps.map((op, idx) => {
-                  const isSelected = operation?.id === op.id;
-                  const customer = partyById.get(op.customer);
-                  const time = op.created_at ? new Date(op.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) : "—";
-                  const itemCount = (op as PurchaseOperation & { items?: unknown[] }).items?.length ?? "—";
-                  return (
-                    <tr
-                      key={op.id}
-                      style={{
-                        background: isSelected ? "var(--accent-dim)" : undefined,
-                        cursor: "pointer",
-                      }}
-                      onClick={() => selectExistingOp(op)}
-                    >
-                      <td style={{ color: "var(--muted)", fontSize: "0.78rem" }}>{todayOps.length - idx}</td>
-                      <td style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                        {isSelected && <span style={{ color: "var(--accent)", marginRight: 6 }}>▶</span>}
-                        {op.folio}
-                      </td>
-                      <td>{customer?.trade_name || customer?.legal_name || "—"}</td>
-                      <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{time}</td>
-                      <td>
-                        <span className={`badge ${statusBadge[op.status] ?? "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
-                          {statusLabel[op.status] ?? op.status}
-                        </span>
-                      </td>
-                      <td style={{ color: "var(--muted)", textAlign: "center" }}>{itemCount}</td>
-                      <td style={{ fontWeight: 700, color: "var(--accent-2)", fontVariantNumeric: "tabular-nums" }}>
-                        {parseFloat(op.total_amount) > 0 ? fmtMXN(parseFloat(op.total_amount)) : "—"}
-                      </td>
-                      <td>
-                        <button
-                          className={isSelected ? "btn-secondary" : "btn-ghost"}
-                          style={{ fontSize: "0.75rem", padding: "3px 10px" }}
-                          onClick={(e) => { e.stopPropagation(); selectExistingOp(op); }}
-                        >
-                          {isSelected ? "Activa" : "Ver"}
-                        </button>
-                      </td>
+        ) : (() => {
+          const totalPages = Math.ceil(todayOps.length / OPS_PAGE_SIZE);
+          const pageOps = todayOps.slice(opsPage * OPS_PAGE_SIZE, (opsPage + 1) * OPS_PAGE_SIZE);
+          return (
+            <>
+              <div style={{ overflowX: "auto" }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 32 }}>#</th>
+                      <th>Folio</th>
+                      <th>Cliente</th>
+                      <th>Hora</th>
+                      <th>Estado</th>
+                      <th>Total</th>
+                      <th></th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody>
+                    {pageOps.map((op) => {
+                      const isSelected = operation?.id === op.id;
+                      const customer = partyById.get(op.customer);
+                      const time = op.created_at
+                        ? new Date(op.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })
+                        : "—";
+                      const globalIdx = todayOps.indexOf(op);
+                      return (
+                        <tr
+                          key={op.id}
+                          style={{ background: isSelected ? "var(--accent-dim)" : undefined, cursor: "pointer" }}
+                          onClick={() => selectExistingOp(op)}
+                        >
+                          <td style={{ color: "var(--muted)", fontSize: "0.78rem" }}>{todayOps.length - globalIdx}</td>
+                          <td style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                            {isSelected && <span style={{ color: "var(--accent)", marginRight: 6 }}>▶</span>}
+                            {op.folio}
+                          </td>
+                          <td>{customer?.trade_name || customer?.legal_name || "—"}</td>
+                          <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{time}</td>
+                          <td>
+                            <span className={`badge ${statusBadge[op.status] ?? "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
+                              {statusLabel[op.status] ?? op.status}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 700, color: "var(--accent-2)", fontVariantNumeric: "tabular-nums" }}>
+                            {parseFloat(op.total_amount) > 0 ? fmtMXN(parseFloat(op.total_amount)) : "—"}
+                          </td>
+                          <td>
+                            <button
+                              className={isSelected ? "btn-secondary" : "btn-ghost"}
+                              style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                              onClick={(e) => { e.stopPropagation(); selectExistingOp(op); }}
+                            >
+                              {isSelected ? "Activa" : "Ver"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {totalPages > 1 && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "10px 20px",
+                  borderTop: "1px solid var(--border)", background: "var(--panel-2)",
+                }}>
+                  <button
+                    className="btn-ghost"
+                    style={{ fontSize: "0.78rem", padding: "3px 10px" }}
+                    disabled={opsPage === 0}
+                    onClick={() => setOpsPage((p) => p - 1)}
+                  >
+                    ← Anterior
+                  </button>
+                  <span style={{ fontSize: "0.8rem", color: "var(--muted)", flex: 1, textAlign: "center" }}>
+                    Página {opsPage + 1} de {totalPages} · {todayOps.length} operaciones
+                  </span>
+                  <button
+                    className="btn-ghost"
+                    style={{ fontSize: "0.78rem", padding: "3px 10px" }}
+                    disabled={opsPage >= totalPages - 1}
+                    onClick={() => setOpsPage((p) => p + 1)}
+                  >
+                    Siguiente →
+                  </button>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
