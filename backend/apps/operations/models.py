@@ -35,6 +35,13 @@ class PurchaseOperation(UUIDTimeStampedModel):
     driver = models.ForeignKey("parties.Driver", on_delete=models.SET_NULL, null=True, blank=True, related_name="purchase_operations")
     opened_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="opened_operations")
     closed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="closed_operations", null=True, blank=True)
+    close_authorized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="authorized_closures",
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     payment_status = models.CharField(max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
     print_status = models.CharField(max_length=20, choices=PrintStatus.choices, default=PrintStatus.PENDING)
@@ -43,6 +50,10 @@ class PurchaseOperation(UUIDTimeStampedModel):
     total_weight_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     total_merma_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    close_authorized_at = models.DateTimeField(null=True, blank=True)
+    close_authorization_reason = models.TextField(blank=True)
+    close_authorization_notes = models.TextField(blank=True)
+    close_recognized_pending_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     confirmed_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
@@ -81,4 +92,3 @@ class TicketItem(UUIDTimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.operation.folio} - {self.material}"
-

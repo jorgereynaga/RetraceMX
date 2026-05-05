@@ -4,6 +4,13 @@ export type User = {
   email: string;
   first_name: string;
   last_name: string;
+  phone?: string;
+  is_staff?: boolean;
+  is_superuser?: boolean;
+  is_active?: boolean;
+  role_codes?: string[];
+  roles?: string[];
+  role_names?: string[];
 };
 
 export type CollectionCenter = {
@@ -52,12 +59,14 @@ export type Device = {
   id: string;
   name: string;
   identifier: string;
-  kind: "vehicle_scale" | "secondary_scale" | "thermal_printer";
+  kind: "vehicle_scale" | "secondary_scale" | "thermal_printer" | "gps_tracker";
   port: string;
   is_connected: boolean;
   is_stable: boolean;
   is_manual_fallback: boolean;
   collection_center?: string | null;
+  vehicle?: string | null;
+  last_seen_at?: string | null;
 };
 
 export type MaterialFamily = {
@@ -76,6 +85,9 @@ export type PriceList = {
   name: string;
   collection_center: string;
   collection_center_name?: string;
+  linked_party?: string | null;
+  linked_party_name?: string | null;
+  linked_party_trade_name?: string | null;
   currency: string;
   valid_from: string;
   valid_to?: string | null;
@@ -104,6 +116,8 @@ export type Party = {
   notes: string;
   is_active: boolean;
   commercial_roles: string[];
+  commercial_role_names?: string[];
+  buyer_type_label?: string;
 };
 
 export type CommercialRole = {
@@ -113,24 +127,44 @@ export type CommercialRole = {
   description: string;
 };
 
+export type Role = {
+  id: string;
+  code: string;
+  name: string;
+  is_active: boolean;
+  permissions?: string[];
+};
+
 export type PurchaseOperation = {
   id: string;
   folio: string;
   status: string;
+  status_label?: string;
   payment_status: string;
+  payment_status_label?: string;
   print_status: string;
   total_weight_kg: string;
   total_amount: string;
+  paid_amount?: string;
+  pending_amount?: string;
   collection_center: string;
   customer: string;
+  customer_name?: string;
+  customer_trade_name?: string | null;
+  customer_legal_name?: string;
   vehicle?: string | null;
   driver?: string | null;
+  vehicle_plate?: string | null;
   created_at?: string;
   opened_by?: string | null;
   opened_by_name?: string | null;
   driver_name?: string | null;
-  vehicle_plate?: string | null;
   active_weighing_session?: string | null;
+  close_authorized_by?: string | null;
+  close_authorized_at?: string | null;
+  close_authorization_reason?: string;
+  close_authorization_notes?: string;
+  close_recognized_pending_amount?: string;
 };
 
 export type ScaleReading = {
@@ -165,9 +199,12 @@ export type PriceSuggestion = {
   found: boolean;
   collection_center_id: string;
   material_id: string;
+  party_id?: string | null;
   unit_price: string | null;
   price_list_id: string | null;
   price_list_name: string | null;
+  price_list_party_id?: string | null;
+  price_list_party_name?: string | null;
   currency: string | null;
   valid_from?: string | null;
   valid_to?: string | null;
@@ -177,7 +214,9 @@ export type TicketItem = {
   id: string;
   operation: string;
   material: string;
+  material_name?: string;
   method: string;
+  method_label?: string;
   gross_weight_kg: string;
   tare_weight_kg: string;
   net_weight_kg: string;
@@ -186,14 +225,80 @@ export type TicketItem = {
   amount: string;
   status: string;
   notes?: string;
+  confirmed_by?: string | null;
+  confirmed_by_name?: string | null;
+  confirmed_at?: string | null;
+  sort_order?: number;
 };
 
 export type Payment = {
   id: string;
+  folio?: string;
   operation: string;
   amount: string;
+  applied_amount?: string;
+  received_amount?: string;
+  change_amount?: string;
   method: string;
+  method_label?: string;
   reference?: string;
+  notes?: string;
+  status?: string;
+  status_label?: string;
+  operation_folio?: string;
+  received_by?: string | null;
+  received_by_name?: string | null;
+  paid_at?: string;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancel_reason?: string;
+};
+
+export type InventoryMovement = {
+  id: string;
+  operation?: string | null;
+  ticket_item?: string | null;
+  sale_order?: string | null;
+  sale_item?: string | null;
+  material: string;
+  material_name?: string | null;
+  collection_center: string;
+  collection_center_name?: string | null;
+  movement_type: "inbound" | "outbound" | "adjustment";
+  movement_type_label?: string;
+  quantity_kg: string;
+  unit_price: string;
+  amount: string;
+  notes?: string;
+  created_by?: string | null;
+  created_by_name?: string | null;
+  occurred_at?: string;
+};
+
+export type InventoryBalance = {
+  collection_center_id: string;
+  collection_center_name: string;
+  material_id: string;
+  material_name: string;
+  inbound_kg: string;
+  outbound_kg: string;
+  adjustment_kg: string;
+  balance_kg: string;
+  movements_count: number;
+  last_movement_at?: string | null;
+};
+
+export type InventorySummary = {
+  totals: {
+    movements_count: number;
+    inbound_count: number;
+    outbound_count: number;
+    adjustment_count: number;
+    stock_kg: string;
+    positive_balances: number;
+    negative_balances: number;
+  };
+  balances: InventoryBalance[];
 };
 
 export type PrintLog = {
@@ -219,27 +324,175 @@ export type AuditLog = {
 export type SaleOrder = {
   id: string;
   folio: string;
+  sale_type: string;
+  sale_type_label?: string;
+  payment_terms: string;
+  payment_terms_label?: string;
   status: string;
+  status_label?: string;
+  buyer_type_label?: string;
+  buyer_roles?: string[];
+  items_count?: number;
   total_weight_kg: string;
   total_amount: string;
   total_cost: string;
   total_profit: string;
+  paid_amount?: string;
+  pending_amount?: string;
+  payment_status?: string;
+  payment_status_label?: string;
   collection_center: string;
   buyer: string;
   collection_center_name?: string;
   buyer_name?: string;
+  destination_name?: string;
+  transport_mode?: string;
+  transport_operator?: string;
+  transport_plates?: string;
+  contract_reference?: string;
+  negotiated_price_note?: string;
+  notes?: string;
+  created_at?: string;
+};
+
+export type SalePayment = {
+  id: string;
+  folio?: string;
+  sale_order: string;
+  sale_order_folio?: string;
+  amount: string;
+  applied_amount?: string;
+  received_amount?: string;
+  change_amount?: string;
+  method: string;
+  method_label?: string;
+  reference?: string;
+  notes?: string;
+  status?: string;
+  status_label?: string;
+  received_by?: string | null;
+  received_by_name?: string | null;
+  paid_at?: string;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancel_reason?: string;
+};
+
+export type Delivery = {
+  id: string;
+  folio: string;
+  sale_order: string;
+  sale_folio?: string;
+  buyer: string;
+  buyer_name?: string;
+  collection_trip?: string | null;
+  collection_trip_status?: string | null;
+  route_name?: string | null;
+  vehicle_label?: string | null;
+  driver_name?: string | null;
+  status: string;
+  status_label?: string;
+  delivery_type: "complete" | "partial";
+  delivery_type_label?: string;
+  scheduled_date?: string | null;
+  time_window_start?: string | null;
+  time_window_end?: string | null;
+  origin_center: string;
+  origin_center_name?: string;
+  destination_name: string;
+  destination_address: string;
+  destination_lat?: string | null;
+  destination_lng?: string | null;
+  transport_mode?: string;
+  transport_operator?: string;
+  transport_plates?: string;
+  contact_name: string;
+  contact_phone: string;
+  notes: string;
+  items_count?: number;
+  planned_weight_kg?: string;
+  loaded_weight_kg?: string;
+  delivered_weight_kg?: string;
+  last_gps_lat?: string | null;
+  last_gps_lng?: string | null;
+  last_gps_at?: string | null;
+  created_at?: string;
+};
+
+export type DeliveryItem = {
+  id: string;
+  delivery: string;
+  sale_item: string;
+  material: string;
+  material_name?: string;
+  material_code?: string;
+  lot_code: string;
+  description: string;
+  planned_weight_kg: string;
+  loaded_weight_kg: string;
+  delivered_weight_kg: string;
+  rejected_weight_kg: string;
+  unit_price: string;
+  total_amount: string;
+  status: string;
+  notes: string;
+};
+
+export type DeliveryRouteStop = {
+  id: string;
+  trip: string;
+  delivery: string;
+  delivery_folio?: string;
+  sale_folio?: string;
+  buyer_name?: string;
+  stop_order: number;
+  status: string;
+  planned_arrival_at?: string | null;
+  actual_arrival_at?: string | null;
+  actual_departure_at?: string | null;
+  destination_address: string;
+  destination_lat?: string | null;
+  destination_lng?: string | null;
+  distance_from_previous_km: string;
+  notes: string;
+};
+
+export type GPSPosition = {
+  id: string;
+  gps_device: string;
+  device_identifier?: string;
+  vehicle: string;
+  vehicle_label?: string;
+  trip?: string | null;
+  route_name?: string | null;
+  driver?: string | null;
+  lat: string;
+  lng: string;
+  speed_kmh?: string | null;
+  heading?: string | null;
+  accuracy_m?: string | null;
+  recorded_at: string;
+  received_at: string;
+  source: string;
 };
 
 export type SaleItem = {
   id: string;
   sale_order: string;
   material: string;
+  presentation?: string;
+  quality?: string;
+  lot_code?: string;
   quantity_kg: string;
+  list_unit_price?: string;
   unit_price: string;
   amount: string;
   estimated_cost: string;
   profit: string;
   material_name?: string;
+  material_code?: string;
+  presentation_label?: string;
+  quality_label?: string;
 };
 
 export type Route = {
@@ -296,6 +549,8 @@ export type CollectionTrip = {
   closed_by_name?: string;
   closure_notes: string;
   notes: string;
+  deliveries_count?: number;
+  delivery_weight_kg?: string;
 };
 
 export type CollectionTripTelemetryPoint = {

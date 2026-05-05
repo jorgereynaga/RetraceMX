@@ -5,8 +5,6 @@ services:
       POSTGRES_DB: acopio360
       POSTGRES_USER: acopio360
       POSTGRES_PASSWORD: acopio360
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +22,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8001:8000"
     restart: unless-stopped
   frontend:
     build:
@@ -36,7 +34,7 @@ services:
       backend:
         condition: service_started
     ports:
-      - "3000:3000"
+      - "5000:5000"
     restart: unless-stopped
 
 volumes:

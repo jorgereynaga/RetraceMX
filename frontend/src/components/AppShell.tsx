@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 type NavSection = {
   label: string;
@@ -9,39 +10,42 @@ type NavSection = {
 const navSections: NavSection[] = [
   {
     label: "General",
+    items: [{ to: "/dashboard", label: "Dashboard", icon: "DB" }],
+  },
+  {
+    label: "Catalogos",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: "📊" },
+      { to: "/materials", label: "Materiales", icon: "MA" },
+      { to: "/parties", label: "Personas / Empresas", icon: "PE" },
+      { to: "/centers", label: "Centros de acopio", icon: "CA" },
+      { to: "/price-lists", label: "Listas de precios", icon: "PR" },
     ],
   },
   {
-    label: "Catálogos",
+    label: "Operacion",
     items: [
-      { to: "/materials", label: "Materiales", icon: "📦" },
-      { to: "/parties", label: "Personas / Empresas", icon: "🏢" },
-      { to: "/centers", label: "Centros de acopio", icon: "🏭" },
-      { to: "/price-lists", label: "Listas de precios", icon: "💲" },
+      { to: "/compra", label: "Compra de materiales", icon: "CO" },
+      { to: "/cashier", label: "Caja y pagos", icon: "CJ" },
+      { to: "/inventory", label: "Inventarios", icon: "IN" },
     ],
   },
   {
-    label: "Operación",
-    items: [
-      { to: "/compra", label: "Compra de materiales", icon: "⚖️" },
-      { to: "/cashier", label: "Caja y pagos", icon: "💰" },
-      { to: "/operations", label: "Historial de compras", icon: "📋" },
-    ],
+    label: "Ventas",
+    items: [{ to: "/sales", label: "Comercializacion", icon: "VT" }],
   },
   {
-    label: "Comercial",
+    label: "Logistica",
     items: [
-      { to: "/sales", label: "Ventas", icon: "🛒" },
-      { to: "/routes", label: "Rutas", icon: "🗺️" },
-      { to: "/logistics", label: "Logística", icon: "🚚" },
+      { to: "/routes", label: "Rutas", icon: "RT" },
+      { to: "/logistics", label: "Entregas", icon: "EN" },
     ],
   },
   {
     label: "Control",
     items: [
-      { to: "/history", label: "Historial", icon: "🕓" },
+      { to: "/history", label: "Historial de compras", icon: "HI" },
+      { to: "/sales-history", label: "Historial de ventas", icon: "SV" },
+      { to: "/users", label: "Usuarios", icon: "US" },
     ],
   },
 ];
@@ -54,7 +58,7 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <h1>Acopio360</h1>
+          <h1>ReTrace MX</h1>
           <p>Operación · Pesaje · Trazabilidad</p>
         </div>
 
@@ -62,16 +66,30 @@ export function AppShell() {
           {navSections.map((section) => (
             <div key={section.label}>
               <div className="sidebar-section-label">{section.label}</div>
-              {section.items.map(({ to, label, icon }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-                >
-                  <span style={{ fontSize: "1rem", lineHeight: 1 }}>{icon}</span>
-                  {label}
-                </NavLink>
-              ))}
+              {section.items
+                .filter((item) => item.to !== "/users" || userCan(user, "users.manage"))
+                .map(({ to, label, icon }) => (
+                  <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        lineHeight: 1,
+                        minWidth: 28,
+                        height: 28,
+                        borderRadius: 8,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "rgba(255,255,255,0.08)",
+                        color: "var(--text-muted)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {icon}
+                    </span>
+                    {label}
+                  </NavLink>
+                ))}
             </div>
           ))}
         </nav>
@@ -81,8 +99,13 @@ export function AppShell() {
             <div className="sidebar-avatar">{initials}</div>
             <span className="sidebar-username">{user?.username ?? "Usuario"}</span>
           </div>
-          <button className="ghost-button" onClick={clearSession} title="Cerrar sesión">
-            ↩
+          {user?.role_names?.length ? (
+            <div className="muted" style={{ marginTop: -6, marginBottom: 8 }}>
+              {user.role_names.join(", ")}
+            </div>
+          ) : null}
+          <button className="ghost-button" onClick={clearSession} title="Cerrar sesion">
+            Salir
           </button>
         </div>
       </aside>

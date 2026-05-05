@@ -5,6 +5,8 @@ import { Page } from "../components/Page";
 import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
 import { paginate, sortByValue } from "../utils/listing";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 function unitLabel(unit: Material["unit"]) {
   if (unit === "ton") return "Tonelada";
@@ -29,6 +31,8 @@ function emptyForm() {
 type SortKey = "code" | "name" | "family" | "unit" | "valuation" | "review" | "active";
 
 export function MaterialsPage() {
+  const { user } = useAuth();
+  const canManageMaterials = userCan(user, "materials.manage");
   const [items, setItems] = useState<Material[]>([]);
   const [families, setFamilies] = useState<MaterialFamily[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
@@ -77,6 +81,16 @@ export function MaterialsPage() {
   const paginatedItems = useMemo(() => paginate(sortedItems, page, pageSize), [page, pageSize, sortedItems]);
 
   useEffect(() => {
+    if (!selectedMaterialId) return;
+    const index = sortedItems.findIndex((item) => item.id === selectedMaterialId);
+    if (index < 0) return;
+    const targetPage = Math.floor(index / pageSize) + 1;
+    if (targetPage !== page) {
+      setPage(targetPage);
+    }
+  }, [page, pageSize, selectedMaterialId, sortedItems]);
+
+  useEffect(() => {
     if (selectedMaterial) {
       setForm({
         code: selectedMaterial.code,
@@ -113,11 +127,19 @@ export function MaterialsPage() {
 
   function startMermaEdit(item: Material, event: MouseEvent) {
     event.stopPropagation();
+    if (!canManageMaterials) {
+      setMessage("No tienes permiso para editar la merma.");
+      return;
+    }
     setEditingMermaId(item.id);
     setEditingMermaValue(item.default_merma_pct != null ? String(parseFloat(item.default_merma_pct) * 100) : "");
   }
 
   async function commitMermaEdit(item: Material) {
+    if (!canManageMaterials) {
+      setMessage("No tienes permiso para editar la merma.");
+      return;
+    }
     if (mermaCommitting.current) return;
     mermaCommitting.current = true;
     try {
@@ -139,6 +161,10 @@ export function MaterialsPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!canManageMaterials) {
+      setMessage("No tienes permiso para gestionar materiales.");
+      return;
+    }
     setMessage(null);
     try {
       const payload: Record<string, unknown> = {
@@ -156,10 +182,10 @@ export function MaterialsPage() {
         await api.materialUpdate(selectedMaterial.id, payload);
         setMessage("Material actualizado.");
       } else {
-        await api.materialCreate(payload);
+        const created = await api.materialCreate(payload);
         setMessage("Material creado.");
+        setSelectedMaterialId(created.id);
       }
-      setSelectedMaterialId("");
       setForm(emptyForm());
       await refresh();
     } catch (error) {
@@ -169,6 +195,13 @@ export function MaterialsPage() {
 
   async function removeMaterial() {
     if (!selectedMaterial) return;
+    if (!canManageMaterials) {
+      setMessage("No tienes permiso para eliminar materiales.");
+      return;
+    }
+    if (!window.confirm(`Seguro que deseas eliminar el material ${selectedMaterial.code} · ${selectedMaterial.name}? Esta accion no se puede deshacer.`)) {
+      return;
+    }
     setMessage(null);
     try {
       await api.materialDelete(selectedMaterial.id);
@@ -261,12 +294,12 @@ export function MaterialsPage() {
             step={0.0001}
           />
         </label>
-        <button type="submit">{selectedMaterial ? "Actualizar" : "Crear"} material</button>
+        <button type="submit" disabled={!canManageMaterials}>{selectedMaterial ? "Actualizar" : "Crear"} material</button>
         <button type="button" className="ghost-button" onClick={() => { setSelectedMaterialId(""); setForm(emptyForm()); }}>
           Limpiar
         </button>
         {selectedMaterial ? (
-          <button type="button" className="ghost-button" onClick={removeMaterial}>
+          <button type="button" className="ghost-button" onClick={removeMaterial} disabled={!canManageMaterials}>
             Eliminar
           </button>
         ) : null}
@@ -306,7 +339,7 @@ export function MaterialsPage() {
               <td>{item.valuation_possible ? "Sí" : "No"}</td>
               <td>{item.requires_special_review ? "Sí" : "No"}</td>
               <td>{item.is_active ? "Sí" : "No"}</td>
-              <td onClick={(e) => startMermaEdit(item, e)} title="Clic para editar merma" style={{ cursor: "text", minWidth: 100 }}>
+              <td onClick={(e) => startMermaEdit(item, e)} title="Clic para editar merma" style={{ cursor: canManageMaterials ? "text" : "default", minWidth: 100 }}>
                 {editingMermaId === item.id ? (
                   <input
                     type="number"

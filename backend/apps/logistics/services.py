@@ -10,7 +10,22 @@ from django.utils import timezone
 from apps.auditing.services import register_audit_event
 from apps.evidence.models import EvidenceFile
 
-from .models import CollectionTrip, CollectionTripIncident, CollectionTripStop, CollectionTripTelemetryPoint, Route
+from apps.core.utils import generate_folio
+from apps.devices.models import Device
+
+from .models import (
+    CollectionTrip,
+    CollectionTripIncident,
+    CollectionTripStop,
+    CollectionTripTelemetryPoint,
+    Delivery,
+    DeliveryEvidence,
+    DeliveryIncident,
+    DeliveryItem,
+    DeliveryRouteStop,
+    GPSPosition,
+    Route,
+)
 
 
 def calculate_distance_km(start_lat, start_lng, end_lat, end_lng) -> Decimal:
@@ -249,3 +264,255 @@ def close_collection_trip(*, trip: CollectionTrip, user=None, notes: str = "") -
     trip.save(update_fields=["status", "closed_at", "closed_by", "closure_notes", "updated_at"])
     register_audit_event(actor=user, action="close_collection_trip", entity=trip, details={"notes": notes})
     return trip
+
+
+def _sync_sale_from_delivery(delivery: Delivery, user=None):
+    sale_order = delivery.sale_order
+    statuses = list(sale_order.deliveries.values_list("status", flat=True))
+    if not statuses:
+        return sale_order
+
+    if any(status == Delivery.Status.IN_ROUTE for status in statuses):
+        sale_order.status = sale_order.Status.IN_ROUTE
+    elif any(status in {Delivery.Status.LOADING, Delivery.Status.READY_TO_DEPART} for status in statuses):
+        sale_order.status = sale_order.Status.LOADING
+    elif all(status == Delivery.Status.DELIVERED for status in statuses):
+        sale_order.status = sale_order.Status.DELIVERED
+    elif any(status == Delivery.Status.PARTIAL for status in statuses):
+        sale_order.status = sale_order.Status.SCHEDULED_DELIVERY
+    elif any(status in {Delivery.Status.SCHEDULED, Delivery.Status.RESCHEDULED, Delivery.Status.PENDING_SCHEDULING} for status in statuses):
+        sale_order.status = sale_order.Status.SCHEDULED_DELIVERY
+
+    sale_order.save(update_fields=["status", "updated_at"])
+    register_audit_event(actor=user, action="sync_sale_delivery_status", entity=sale_order, details={"delivery": str(delivery.pk), "status": sale_order.status})
+    return sale_order
+
+
+@transaction.atomic
+def create_delivery_from_sale(
+    *,
+    sale_order,
+    user,
+    scheduled_date=None,
+    time_window_start=None,
+    time_window_end=None,
+    destination_name="",
+    destination_address="",
+    destination_lat=None,
+    destination_lng=None,
+    contact_name="",
+    contact_phone="",
+    transport_mode="",
+    transport_operator="",
+    transport_plates="",
+    notes="",
+    delivery_type=Delivery.DeliveryType.COMPLETE,
+    sale_item_ids=None,
+) -> Delivery:
+    if sale_order.status == sale_order.Status.CANCELLED:
+        raise ValidationError("No se puede generar entrega desde una venta cancelada.")
+    sale_items = sale_order.items.all()
+    if sale_item_ids:
+        sale_items = sale_items.filter(id__in=sale_item_ids)
+    if not sale_items.exists():
+        raise ValidationError("No se puede generar entrega desde una venta sin partidas.")
+
+    delivery = Delivery.objects.create(
+        folio=generate_folio("DL"),
+        sale_order=sale_order,
+        buyer=sale_order.buyer,
+        status=Delivery.Status.SCHEDULED if scheduled_date else Delivery.Status.PENDING_SCHEDULING,
+        delivery_type=delivery_type,
+        scheduled_date=scheduled_date or None,
+        time_window_start=time_window_start or None,
+        time_window_end=time_window_end or None,
+        origin_center=sale_order.collection_center,
+        destination_name=destination_name or sale_order.destination_name,
+        destination_address=destination_address or sale_order.buyer.address,
+        destination_lat=destination_lat or None,
+        destination_lng=destination_lng or None,
+        contact_name=contact_name,
+        contact_phone=contact_phone or sale_order.buyer.phone,
+        transport_mode=transport_mode,
+        transport_operator=transport_operator,
+        transport_plates=transport_plates,
+        notes=notes,
+        created_by=user,
+    )
+    for sale_item in sale_items:
+        DeliveryItem.objects.create(
+            delivery=delivery,
+            sale_item=sale_item,
+            material=sale_item.material,
+            lot_code=sale_item.lot_code,
+            description=f"{sale_item.material.name} {sale_item.presentation or ''} {sale_item.quality or ''}".strip(),
+            planned_weight_kg=sale_item.quantity_kg,
+            unit_price=sale_item.unit_price,
+            total_amount=sale_item.amount,
+        )
+    register_audit_event(actor=user, action="create_delivery_from_sale", entity=delivery, details={"sale_order": str(sale_order.pk), "items": sale_items.count()})
+    _sync_sale_from_delivery(delivery, user=user)
+    return delivery
+
+
+@transaction.atomic
+def assign_delivery_to_trip(*, delivery: Delivery, trip: CollectionTrip, user=None, planned_arrival_at=None, notes="") -> Delivery:
+    if delivery.status in {Delivery.Status.CANCELLED, Delivery.Status.DELIVERED}:
+        raise ValidationError("No se puede asignar una entrega cancelada o ya entregada.")
+    if trip.status not in {CollectionTrip.Status.PLANNED, CollectionTrip.Status.DEPARTED}:
+        raise ValidationError("Solo se pueden asignar entregas a rutas planificadas o en proceso.")
+    delivery.collection_trip = trip
+    delivery.assigned_by = user
+    delivery.status = Delivery.Status.SCHEDULED if trip.status == CollectionTrip.Status.PLANNED else Delivery.Status.IN_ROUTE
+    delivery.save(update_fields=["collection_trip", "assigned_by", "status", "updated_at"])
+    DeliveryRouteStop.objects.update_or_create(
+        delivery=delivery,
+        defaults={
+            "trip": trip,
+            "stop_order": trip.delivery_stops.count() + 1,
+            "status": DeliveryRouteStop.Status.PENDING if trip.status == CollectionTrip.Status.PLANNED else DeliveryRouteStop.Status.ON_THE_WAY,
+            "planned_arrival_at": planned_arrival_at or None,
+            "destination_address": delivery.destination_address,
+            "destination_lat": delivery.destination_lat,
+            "destination_lng": delivery.destination_lng,
+            "notes": notes,
+        },
+    )
+    register_audit_event(actor=user, action="assign_delivery_to_trip", entity=delivery, details={"trip": str(trip.pk)})
+    _sync_sale_from_delivery(delivery, user=user)
+    return delivery
+
+
+@transaction.atomic
+def update_delivery_status(*, delivery: Delivery, status: str, user=None, notes="") -> Delivery:
+    if status not in Delivery.Status.values:
+        raise ValidationError("Estado de entrega inválido.")
+    delivery.status = status
+    now = timezone.now()
+    if status == Delivery.Status.LOADING and not delivery.started_at:
+        delivery.started_at = now
+    if status == Delivery.Status.AT_DESTINATION and not delivery.arrived_at:
+        delivery.arrived_at = now
+    if status == Delivery.Status.DELIVERED and not delivery.delivered_at:
+        delivery.delivered_at = now
+    if status == Delivery.Status.CANCELLED and not delivery.cancelled_at:
+        delivery.cancelled_at = now
+    delivery.save(update_fields=["status", "started_at", "arrived_at", "delivered_at", "cancelled_at", "updated_at"])
+    if hasattr(delivery, "route_stop"):
+        stop_status = {
+            Delivery.Status.IN_ROUTE: DeliveryRouteStop.Status.ON_THE_WAY,
+            Delivery.Status.AT_DESTINATION: DeliveryRouteStop.Status.AT_DESTINATION,
+            Delivery.Status.DELIVERED: DeliveryRouteStop.Status.DELIVERED,
+            Delivery.Status.PARTIAL: DeliveryRouteStop.Status.PARTIAL,
+            Delivery.Status.REJECTED: DeliveryRouteStop.Status.REJECTED,
+            Delivery.Status.CANCELLED: DeliveryRouteStop.Status.CANCELLED,
+        }.get(status)
+        if stop_status:
+            delivery.route_stop.status = stop_status
+            if status == Delivery.Status.AT_DESTINATION:
+                delivery.route_stop.actual_arrival_at = now
+            if status in {Delivery.Status.DELIVERED, Delivery.Status.PARTIAL, Delivery.Status.REJECTED}:
+                delivery.route_stop.actual_departure_at = now
+            delivery.route_stop.save(update_fields=["status", "actual_arrival_at", "actual_departure_at", "updated_at"])
+    register_audit_event(actor=user, action="update_delivery_status", entity=delivery, details={"status": status, "notes": notes})
+    _sync_sale_from_delivery(delivery, user=user)
+    return delivery
+
+
+@transaction.atomic
+def register_delivery_evidence(*, delivery: Delivery, user=None, file=None, evidence_type=DeliveryEvidence.EvidenceType.PHOTO, receiver_name="", receiver_phone="", lat=None, lng=None, notes="") -> DeliveryEvidence:
+    evidence = DeliveryEvidence.objects.create(
+        delivery=delivery,
+        route_stop=getattr(delivery, "route_stop", None),
+        evidence_type=evidence_type,
+        file=file,
+        receiver_name=receiver_name,
+        receiver_phone=receiver_phone,
+        lat=lat or None,
+        lng=lng or None,
+        notes=notes,
+        created_by=user,
+    )
+    register_audit_event(actor=user, action="register_delivery_evidence", entity=evidence, details={"delivery": str(delivery.pk), "evidence_type": evidence_type})
+    return evidence
+
+
+@transaction.atomic
+def register_delivery_incident(*, delivery: Delivery, incident_type: str, description="", user=None) -> DeliveryIncident:
+    incident = DeliveryIncident.objects.create(
+        delivery=delivery,
+        trip=delivery.collection_trip,
+        incident_type=incident_type,
+        description=description,
+        reported_by=user,
+    )
+    if incident_type in {DeliveryIncident.IncidentType.MATERIAL_REJECTED, DeliveryIncident.IncidentType.CUSTOMER_REJECTED}:
+        update_delivery_status(delivery=delivery, status=Delivery.Status.REJECTED, user=user, notes=description)
+    elif incident_type == DeliveryIncident.IncidentType.PARTIAL_DELIVERY:
+        update_delivery_status(delivery=delivery, status=Delivery.Status.PARTIAL, user=user, notes=description)
+    register_audit_event(actor=user, action="register_delivery_incident", entity=incident, details={"delivery": str(delivery.pk), "type": incident_type})
+    return incident
+
+
+@transaction.atomic
+def receive_gps_position(
+    *,
+    device_code="",
+    imei="",
+    lat,
+    lng,
+    speed_kmh=None,
+    heading=None,
+    accuracy_m=None,
+    recorded_at=None,
+    raw_payload=None,
+) -> GPSPosition:
+    latitude = Decimal(str(lat))
+    longitude = Decimal(str(lng))
+    if latitude < Decimal("-90") or latitude > Decimal("90") or longitude < Decimal("-180") or longitude > Decimal("180"):
+        raise ValidationError("Coordenadas GPS inválidas.")
+
+    device = Device.objects.filter(kind=Device.Kind.GPS_TRACKER, identifier=device_code).first()
+    if not device and imei:
+        device = Device.objects.filter(kind=Device.Kind.GPS_TRACKER, metadata__imei=imei).first()
+    if not device:
+        raise ValidationError("Dispositivo GPS no registrado.")
+    if not device.is_connected:
+        raise ValidationError("Dispositivo GPS inactivo o sin autorización.")
+    if not device.vehicle:
+        raise ValidationError("El dispositivo GPS no tiene vehículo asociado.")
+
+    active_trip = CollectionTrip.objects.filter(vehicle=device.vehicle, status=CollectionTrip.Status.DEPARTED).order_by("-departed_at").first()
+    driver = active_trip.driver if active_trip else device.vehicle.collection_trips.filter(status=CollectionTrip.Status.DEPARTED).order_by("-departed_at").values_list("driver", flat=True).first()
+    if driver and not hasattr(driver, "pk"):
+        from apps.parties.models import Driver
+
+        driver = Driver.objects.filter(pk=driver).first()
+
+    timestamp = recorded_at or timezone.now()
+    position = GPSPosition.objects.create(
+        gps_device=device,
+        vehicle=device.vehicle,
+        trip=active_trip,
+        driver=driver,
+        lat=latitude,
+        lng=longitude,
+        speed_kmh=Decimal(str(speed_kmh)) if speed_kmh not in (None, "") else None,
+        heading=Decimal(str(heading)) if heading not in (None, "") else None,
+        accuracy_m=Decimal(str(accuracy_m)) if accuracy_m not in (None, "") else None,
+        recorded_at=timestamp,
+        raw_payload=raw_payload or {},
+    )
+    device.last_seen_at = timezone.now()
+    device.save(update_fields=["last_seen_at", "updated_at"])
+    if active_trip:
+        register_trip_telemetry_point(
+            trip=active_trip,
+            latitude=latitude,
+            longitude=longitude,
+            speed_kmh=speed_kmh,
+            source=CollectionTripTelemetryPoint.Source.GPS,
+            notes="Posición recibida desde dispositivo GPS",
+        )
+    register_audit_event(actor=None, action="receive_gps_position", entity=position, details={"device": str(device.pk), "trip": str(active_trip.pk) if active_trip else None})
+    return position

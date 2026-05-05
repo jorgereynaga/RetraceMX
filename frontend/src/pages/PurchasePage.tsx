@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
 import { TicketViewer } from "../components/TicketViewer";
-import type { CollectionCenter, Device, Driver, Material, MaterialFamily, Party, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle, WeighingSession } from "../types";
+import type { CollectionCenter, Device, Driver, Material, MaterialFamily, Party, PriceList, PriceListItem, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle, WeighingSession } from "../types";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 type LiveReading = {
   weight_kg: string;
@@ -33,13 +35,19 @@ type EditState = {
 };
 
 export function PurchasePage() {
+  const { user } = useAuth();
+  const canManagePurchases = userCan(user, "purchases.manage");
   const [centers, setCenters] = useState<CollectionCenter[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
   const [families, setFamilies] = useState<MaterialFamily[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [driverId, setDriverId] = useState("");
+  const [driverInput, setDriverInput] = useState("");
+  const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
 
   const [centerId, setCenterId] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -88,6 +96,7 @@ export function PurchasePage() {
   const [printMsg, setPrintMsg] = useState<string | null>(null);
 
   const [todayOps, setTodayOps] = useState<PurchaseOperation[]>([]);
+  const [allOperations, setAllOperations] = useState<PurchaseOperation[]>([]);
   const [opsLoading, setOpsLoading] = useState(false);
   const [opsPage, setOpsPage] = useState(0);
   const OPS_PAGE_SIZE = 2;
@@ -105,6 +114,8 @@ export function PurchasePage() {
       api.centers().then(setCenters),
       api.parties().then(setParties),
       api.materials().then(setMaterials),
+      api.priceLists().then(setPriceLists),
+      api.priceListItems().then(setPriceListItems),
       api.materialFamilies().then(setFamilies),
       api.vehicles().then(setAllVehicles),
       api.devices().then(setDevices),
@@ -138,6 +149,28 @@ export function PurchasePage() {
     );
   }, [customerVehicles, plateInput]);
 
+  const activeDrivers = useMemo(() => drivers.filter((d) => d.is_active !== false), [drivers]);
+  const customerDriverPool = useMemo(() => {
+    if (!customerId) return [];
+    const relatedIds = new Set(
+      allOperations
+        .filter((op) => op.customer === customerId && op.driver)
+        .map((op) => op.driver as string),
+    );
+    const related = activeDrivers.filter((driver) => relatedIds.has(driver.id));
+    return related.length ? related : activeDrivers;
+  }, [activeDrivers, allOperations, customerId]);
+  const driverSuggestions = useMemo(() => {
+    if (!customerId) return [];
+    const q = driverInput.trim().toLowerCase();
+    if (!q) return customerDriverPool;
+    return customerDriverPool.filter((d) => {
+      const name = d.person_name?.toLowerCase() ?? "";
+      const license = d.license_number.toLowerCase();
+      return name.includes(q) || license.includes(q);
+    });
+  }, [customerDriverPool, customerId, driverInput]);
+
   const scaleDevice = useMemo(() => {
     const kind = method === "vehicle_differential" ? "vehicle_scale" : "secondary_scale";
     return (
@@ -162,19 +195,59 @@ export function PurchasePage() {
   useEffect(() => {
     if (!centerId || !materialId) { setPriceSuggestion(null); return; }
     const seq = ++priceLookupSeq.current;
-    api.priceSuggestion(centerId, materialId)
+    api.priceSuggestion(centerId, materialId, customerId || undefined)
       .then((s) => { if (seq !== priceLookupSeq.current) return; setPriceSuggestion(s); setUnitPrice(s.unit_price ?? "0"); })
       .catch(() => { if (seq !== priceLookupSeq.current) return; setPriceSuggestion(null); });
-  }, [centerId, materialId]);
+  }, [centerId, customerId, materialId]);
 
   const filteredMaterials = useMemo(() => {
     if (!familyFilter) return materials;
     return materials.filter((m) => m.family === familyFilter);
   }, [materials, familyFilter]);
 
+  function materialOptionLabel(material: Material) {
+    const priceItem = priceItemByMaterialId.get(material.id);
+    if (!priceItem) return `${material.name}${material.code ? ` · ${material.code}` : ""}`;
+    const priceValue = parseFloat(priceItem.unit_price) || 0;
+    return `${material.name}${material.code ? ` · ${material.code}` : ""} · ${fmtMXN(priceValue)}`;
+  }
+
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
   const vehicleById = useMemo(() => new Map(allVehicles.map((v) => [v.id, v])), [allVehicles]);
   const partyById = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+  const activeCustomerPriceList = useMemo(() => {
+    if (!centerId || !customerId) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    const candidates = priceLists.filter((priceList) => (
+      priceList.collection_center === centerId
+      && priceList.linked_party === customerId
+      && priceList.is_active
+      && priceList.valid_from <= today
+      && (!priceList.valid_to || priceList.valid_to >= today)
+    ));
+    return candidates.sort((a, b) => b.valid_from.localeCompare(a.valid_from) || a.name.localeCompare(b.name))[0] ?? null;
+  }, [centerId, customerId, priceLists]);
+  const fallbackPriceList = useMemo(() => {
+    if (!centerId) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    const candidates = priceLists.filter((priceList) => (
+      priceList.collection_center === centerId
+      && !priceList.linked_party
+      && priceList.is_active
+      && priceList.valid_from <= today
+      && (!priceList.valid_to || priceList.valid_to >= today)
+    ));
+    return candidates.sort((a, b) => b.valid_from.localeCompare(a.valid_from) || a.name.localeCompare(b.name))[0] ?? null;
+  }, [centerId, priceLists]);
+  const selectedPriceList = activeCustomerPriceList ?? fallbackPriceList;
+  const selectedPriceListItems = useMemo(
+    () => priceListItems.filter((item) => item.price_list === selectedPriceList?.id && item.is_active),
+    [priceListItems, selectedPriceList?.id],
+  );
+  const priceItemByMaterialId = useMemo(
+    () => new Map(selectedPriceListItems.map((item) => [item.material, item])),
+    [selectedPriceListItems],
+  );
 
   const isDisc = liveReading?.raw_value === "DISCONNECTED";
   const liveStable = !!liveReading?.is_stable && !isDisc;
@@ -219,6 +292,8 @@ export function PurchasePage() {
 
   const canAddItemManual = !!operation && !!materialId && method === "manual_contingency" && !!manualGross && netClean > 0 && !confirmed;
   const canAddItemDirect = !!operation && !!materialId && method === "secondary_direct" && !!grossKg && netClean > 0 && !confirmed;
+  const canCancelOperation = !!operation && operation.print_status === "pending" && operation.payment_status === "pending" && !confirmed;
+  const isCancelledOperation = operation?.status === "cancelled";
 
   function captureGross() {
     if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable."); return; }
@@ -268,16 +343,36 @@ export function PurchasePage() {
     return created.id;
   }
 
+  async function resolveDriverSelection(): Promise<string | null> {
+    const query = driverInput.trim().toLowerCase();
+    if (!query) return null;
+    const pool = customerDriverPool.length ? customerDriverPool : activeDrivers;
+    const exact = pool.find((driver) => {
+      const name = driver.person_name?.trim().toLowerCase() ?? "";
+      const license = driver.license_number.trim().toLowerCase();
+      return name === query || license === query;
+    });
+    if (exact) return exact.id;
+    const partial = pool.find((driver) => {
+      const name = driver.person_name?.trim().toLowerCase() ?? "";
+      const license = driver.license_number.trim().toLowerCase();
+      return name.includes(query) || license.includes(query);
+    });
+    return partial?.id ?? null;
+  }
+
   async function openOperation() {
+    if (!canManagePurchases) { setOpError("No tienes permiso para iniciar compras."); return; }
     if (!centerId || !customerId) { setOpError("Selecciona centro y cliente."); return; }
     setOpLoading(true); setOpError(null);
     try {
       const resolvedVehicleId = await resolveVehicleId();
+      const resolvedDriverId = await resolveDriverSelection();
       const op = await api.operationCreate({
         collection_center_id: centerId,
         customer_id: customerId,
         vehicle_id: resolvedVehicleId,
-        driver_id: driverId || null,
+        driver_id: resolvedDriverId || driverId || null,
       });
       setOperation(op);
       setItems([]);
@@ -304,6 +399,7 @@ export function PurchasePage() {
   }
 
   async function addItemDiff() {
+    if (!canManagePurchases) { setItemMsg("No tienes permiso para agregar partidas."); return; }
     if (!operation || !canAddItemDiff) return;
     setItemLoading(true); setItemMsg(null);
     try {
@@ -360,6 +456,7 @@ export function PurchasePage() {
   }
 
   async function addItem() {
+    if (!canManagePurchases) { setItemMsg("No tienes permiso para agregar partidas."); return; }
     if (!operation) return;
     setItemLoading(true); setItemMsg(null);
     try {
@@ -393,6 +490,7 @@ export function PurchasePage() {
   }
 
   async function deleteItem(itemId: string) {
+    if (!canManagePurchases) { setItemMsg("No tienes permiso para eliminar partidas."); return; }
     if (!window.confirm("¿Eliminar esta partida?")) return;
     setItemLoading(true);
     try {
@@ -411,6 +509,10 @@ export function PurchasePage() {
   }
 
   function startEditItem(item: TicketItem) {
+    if (!canManagePurchases) {
+      setItemMsg("No tienes permiso para editar partidas.");
+      return;
+    }
     setEditState({
       itemId: item.id,
       materialId: item.material,
@@ -423,6 +525,7 @@ export function PurchasePage() {
   }
 
   async function saveEditItem() {
+    if (!canManagePurchases) { setItemMsg("No tienes permiso para actualizar partidas."); return; }
     if (!editState || !operation) return;
     setItemLoading(true);
     try {
@@ -465,6 +568,7 @@ export function PurchasePage() {
   }
 
   async function printTicket() {
+    if (!canManagePurchases) { setPrintMsg("No tienes permiso para imprimir tickets de compra."); return; }
     if (!operation) return;
     try {
       await api.operationPrint(operation.id, {
@@ -479,12 +583,36 @@ export function PurchasePage() {
     }
   }
 
+  async function cancelOperation() {
+    if (!canManagePurchases) { setItemMsg("No tienes permiso para cancelar compras."); return; }
+    if (!operation) return;
+    if (!canCancelOperation) {
+      setItemMsg("No se puede cancelar: ya hay ticket emitido o pago registrado.");
+      return;
+    }
+    if (!window.confirm("¿Cancelar esta compra antes de emitir ticket o registrar pago?")) return;
+    setConfirming(true);
+    try {
+      await api.operationStatusChange(operation.id, "cancelled", "Cancelación antes de ticket y pago");
+      const refreshed = await api.operationDetail(operation.id);
+      setOperation(refreshed);
+      setConfirmed(refreshed.status === "confirmed" || refreshed.status === "completed");
+      await loadTodayOps();
+      setItemMsg("Compra cancelada.");
+    } catch (e) {
+      setItemMsg(e instanceof Error ? e.message : "Error al cancelar la compra.");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
   async function loadTodayOps() {
     setOpsLoading(true);
     try {
       const all = await api.operationsAll();
       const todayStr = new Date().toLocaleDateString("en-CA");
       const unique = [...new Map((all as PurchaseOperation[]).map((op) => [op.id, op])).values()];
+      setAllOperations(unique);
       const filtered = unique
         .filter((op) => op.created_at && new Date(op.created_at).toLocaleDateString("en-CA") === todayStr)
         .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
@@ -500,7 +628,7 @@ export function PurchasePage() {
   async function selectExistingOp(op: PurchaseOperation) {
     setOpError(null);
     setOperation(op);
-    setConfirmed(op.status === "confirmed" || op.status === "completed" || op.status === "cancelled");
+    setConfirmed(op.status === "confirmed" || op.status === "completed" || op.status === "cancelled" || op.payment_status === "paid");
     setPrintMsg(null);
     setEditState(null);
     resetWeigh();
@@ -508,6 +636,8 @@ export function PurchasePage() {
     setCenterId(op.collection_center);
     setCustomerId(op.customer);
     setDriverId(op.driver ?? "");
+    setDriverInput(op.driver_name ?? drivers.find((d) => d.id === op.driver)?.person_name ?? "");
+    setShowDriverSuggestions(false);
     setEditingDriver(false); setEditDriverId(""); setDriverUpdateError(null);
     setItems([]);
     try {
@@ -521,6 +651,7 @@ export function PurchasePage() {
     setConfirmed(false); setPrintMsg(null);
     setCustomerId(""); setPlateInput(""); setCustomerVehicles([]);
     setDriverId("");
+    setDriverInput(""); setShowDriverSuggestions(false);
     resetWeigh();
     setMaterialId(""); setFamilyFilter("");
     setEditState(null);
@@ -529,6 +660,7 @@ export function PurchasePage() {
   }
 
   async function saveDriver() {
+    if (!canManagePurchases) { setDriverUpdateError("No tienes permiso para cambiar el conductor."); return; }
     if (!operation) return;
     setDriverUpdateLoading(true);
     setDriverUpdateError(null);
@@ -630,24 +762,24 @@ export function PurchasePage() {
   return (
     <Page title="Compra de materiales">
 
-      {/* ── Operaciones del día ─────────────────────────────── */}
+      {/* Operaciones del día */}
       <div className="section-panel" style={{ marginBottom: 20 }}>
         <div className="section-panel-header">
           <h3>Operaciones del día</h3>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            {opsLoading && <span className="muted" style={{ fontSize: "0.8rem" }}>Cargando…</span>}
+            {opsLoading && <span className="muted" style={{ fontSize: "0.8rem" }}>Cargando...</span>}
             <span className="badge badge-gray">{todayOps.length} operación{todayOps.length !== 1 ? "es" : ""}</span>
             <button className="btn-ghost" style={{ fontSize: "0.78rem", padding: "3px 10px" }} onClick={loadTodayOps} disabled={opsLoading}>
-              ↺ Actualizar
+              Actualizar
             </button>
-            <button className="btn-primary" style={{ fontSize: "0.78rem", padding: "4px 14px" }} onClick={startNew}>
+            <button className="btn-primary" style={{ fontSize: "0.78rem", padding: "4px 14px" }} onClick={startNew} disabled={!canManagePurchases}>
               + Nueva compra
             </button>
           </div>
         </div>
         {todayOps.length === 0 ? (
           <div style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "0.85rem" }}>
-            {opsLoading ? "Cargando operaciones del día…" : "No hay operaciones registradas hoy. Presiona + Nueva compra para iniciar."}
+            {opsLoading ? "Cargando operaciones del día..." : "No hay operaciones registradas hoy. Presiona + Nueva compra para iniciar."}
           </div>
         ) : (() => {
           const totalPages = Math.ceil(todayOps.length / OPS_PAGE_SIZE);
@@ -675,7 +807,7 @@ export function PurchasePage() {
                       const customer = partyById.get(op.customer);
                       const time = op.created_at
                         ? new Date(op.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })
-                        : "—";
+                        : "-";
                       const globalIdx = todayOps.indexOf(op);
                       return (
                         <tr
@@ -688,9 +820,9 @@ export function PurchasePage() {
                             {isSelected && <span style={{ color: "var(--accent)", marginRight: 6 }}>▶</span>}
                             {op.folio}
                           </td>
-                          <td>{customer?.trade_name || customer?.legal_name || "—"}</td>
-                          <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.opened_by_name ?? "—"}</td>
-                          <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.driver_name?.trim() || "—"}</td>
+                          <td>{customer?.trade_name || customer?.legal_name || "-"}</td>
+                          <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.opened_by_name ?? "-"}</td>
+                          <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.driver_name?.trim() || "-"}</td>
                           <td style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{time}</td>
                           <td>
                             <span className={`badge ${statusBadge[op.status] ?? "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
@@ -698,7 +830,7 @@ export function PurchasePage() {
                             </span>
                           </td>
                           <td style={{ fontWeight: 700, color: "var(--accent-2)", fontVariantNumeric: "tabular-nums" }}>
-                            {parseFloat(op.total_amount) > 0 ? fmtMXN(parseFloat(op.total_amount)) : "—"}
+                            {parseFloat(op.total_amount) > 0 ? fmtMXN(parseFloat(op.total_amount)) : "-"}
                           </td>
                           <td>
                             <button
@@ -726,7 +858,7 @@ export function PurchasePage() {
                     disabled={opsPage === 0}
                     onClick={() => setOpsPage((p) => p - 1)}
                   >
-                    ← Anterior
+                    Anterior
                   </button>
                   <span style={{ fontSize: "0.8rem", color: "var(--muted)", flex: 1, textAlign: "center" }}>
                     Página {opsPage + 1} de {totalPages} · {todayOps.length} operaciones
@@ -748,13 +880,13 @@ export function PurchasePage() {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
 
-        {/* ── LEFT COLUMN ─────────────────────────────────────── */}
+        {/* LEFT COLUMN */}
         <div style={{ display: "grid", gap: 16 }}>
 
           {/* Step 1: Operation setup */}
-          <div className="section-panel">
+          <div className="section-panel" style={{ display: operation ? "none" : "block" }}>
             <div className="section-panel-header">
-              <h3>① Datos de la compra</h3>
+              <h3>Datos de la compra</h3>
               {operation && (
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <span className="badge badge-green">Folio: {operation.folio}</span>
@@ -769,20 +901,25 @@ export function PurchasePage() {
                 <label>
                   Centro de acopio
                   <select value={centerId} onChange={(e) => setCenterId(e.target.value)} disabled={!!operation}>
-                    <option value="">Seleccionar…</option>
+                    <option value="">Seleccionar...</option>
                     {collectionCenters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {materialId && priceItemByMaterialId.get(materialId) && (
+                    <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 4 }}>
+                      Precio del cliente: <strong style={{ color: "var(--text)" }}>{fmtMXN(parseFloat(priceItemByMaterialId.get(materialId)?.unit_price ?? "0") || 0)}</strong>
+                    </div>
+                  )}
                 </label>
               )}
               {center && collectionCenters.length <= 1 && (
-                <div><span className="badge badge-blue">🏭 {center.name}</span></div>
+                  <div><span className="badge badge-blue">🏭 {center.name}</span></div>
               )}
 
               <label>
                 Cliente / Proveedor <span style={{ color: "var(--danger)" }}>*</span>
                 <select
                   value={customerId}
-                  onChange={(e) => { setCustomerId(e.target.value); setPlateInput(""); }}
+                    onChange={(e) => { setCustomerId(e.target.value); setPlateInput(""); setDriverId(""); setDriverInput(""); setShowDriverSuggestions(false); }}
                   disabled={!!operation}
                   style={{ borderColor: !customerId ? "rgba(239,68,68,0.5)" : undefined }}
                 >
@@ -799,7 +936,7 @@ export function PurchasePage() {
                   value={plateInput}
                   placeholder={
                     !customerId ? "Selecciona cliente primero" :
-                    vehicleLoading ? "Cargando…" :
+                    vehicleLoading ? "Cargando..." :
                     customerVehicles.length > 0 ? `${customerVehicles.length} vehículo(s) registrados — escribe la placa` :
                     "Escribe la placa (nueva o existente)"
                   }
@@ -826,7 +963,7 @@ export function PurchasePage() {
                       >
                         <span style={{ fontWeight: 600 }}>{v.plate_number}</span>
                         {v.label && v.label !== v.plate_number && (
-                          <span style={{ color: "var(--muted)", marginLeft: 8 }}>— {v.label}</span>
+                            <span style={{ color: "var(--muted)", marginLeft: 8 }}>— {v.label}</span>
                         )}
                       </div>
                     ))}
@@ -842,17 +979,59 @@ export function PurchasePage() {
               </label>
 
               {!operation ? (
-                <label>
+                <label style={{ position: "relative" }}>
                   Conductor (opcional)
-                  <select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
-                    <option value="">— Sin conductor asignado —</option>
-                    {drivers.filter((d) => d.is_active !== false).map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.person_name ?? d.license_number ?? d.id}
-                        {d.person_name && d.license_number ? ` (Lic: ${d.license_number})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={driverInput}
+                    placeholder={
+                      !customerId
+                        ? "Selecciona cliente primero"
+                        : customerDriverPool.length > 0
+                          ? `${customerDriverPool.length} conductor(es) relacionados — escribe para buscar`
+                          : "Escribe el conductor"
+                    }
+                    disabled={!customerId || !!operation}
+                    onChange={(e) => { setDriverInput(e.target.value); setDriverId(""); setShowDriverSuggestions(true); }}
+                    onFocus={() => setShowDriverSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowDriverSuggestions(false), 150)}
+                    autoComplete="off"
+                  />
+                  {showDriverSuggestions && !operation && customerId && driverSuggestions.length > 0 && (
+                    <div style={{
+                      position: "absolute", zIndex: 10, left: 0, right: 0, top: "100%",
+                      background: "var(--panel)", border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                      maxHeight: 220, overflowY: "auto",
+                    }}>
+                      {driverSuggestions.map((d) => (
+                        <div
+                          key={d.id}
+                          style={{ padding: "8px 12px", cursor: "pointer", fontSize: "0.85rem" }}
+                          onMouseDown={() => {
+                            setDriverId(d.id);
+                            setDriverInput(d.person_name ?? d.license_number ?? d.id);
+                            setShowDriverSuggestions(false);
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                        >
+                          <span style={{ fontWeight: 600 }}>{d.person_name ?? d.license_number ?? d.id}</span>
+                          {d.person_name && d.license_number && (
+                            <span style={{ color: "var(--muted)", marginLeft: 8 }}>— Lic: {d.license_number}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {driverInput && !operation && (
+                    <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 3 }}>
+                      {driverSuggestions.find((d) => d.id === driverId) ||
+                      activeDrivers.find((d) => d.person_name?.trim().toLowerCase() === driverInput.trim().toLowerCase() || d.license_number.trim().toLowerCase() === driverInput.trim().toLowerCase())
+                        ? "✓ Conductor registrado"
+                        : "⚠ Se usará la coincidencia elegida al iniciar la compra"}
+                    </div>
+                  )}
                 </label>
               ) : (
                 <div>
@@ -880,9 +1059,9 @@ export function PurchasePage() {
                           className="btn-primary"
                           style={{ fontSize: "0.78rem", padding: "4px 12px" }}
                           onClick={saveDriver}
-                          disabled={driverUpdateLoading}
+                          disabled={!canManagePurchases || driverUpdateLoading}
                         >
-                          {driverUpdateLoading ? "Guardando…" : "Guardar"}
+                          {driverUpdateLoading ? "Guardando..." : "Guardar"}
                         </button>
                         <button
                           className="btn-ghost"
@@ -908,6 +1087,7 @@ export function PurchasePage() {
                             setEditingDriver(true);
                             setDriverUpdateError(null);
                           }}
+                          disabled={!canManagePurchases}
                         >
                           ✏ Cambiar
                         </button>
@@ -923,20 +1103,79 @@ export function PurchasePage() {
                   className="btn-primary"
                   style={{ marginTop: 4 }}
                   onClick={openOperation}
-                  disabled={opLoading || !customerId || !centerId}
+                  disabled={!canManagePurchases || opLoading || !customerId || !centerId}
                 >
-                  {opLoading ? "Abriendo…" : "▶ Iniciar compra"}
+                  {opLoading ? "Abriendo..." : "Iniciar compra"}
                 </button>
               ) : (
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   <span className={`badge ${confirmed ? "badge-green" : "badge-amber"}`}>
                     {confirmed ? "Confirmada ✓" : `Estado: ${operation.status}`}
                   </span>
-                  {!confirmed && <button className="btn-ghost" onClick={startNew}>Nueva compra</button>}
+                  {!confirmed && <button className="btn-ghost" onClick={startNew} disabled={!canManagePurchases}>Nueva compra</button>}
                 </div>
               )}
+              <div className="info-banner" style={{ display: "grid", gap: 4 }}>
+                <strong>Lista de precios aplicada</strong>
+                <span style={{ fontSize: "0.82rem" }}>
+                  {selectedPriceList
+                    ? `${selectedPriceList.name} · ${selectedPriceList.code}${selectedPriceList.linked_party ? ` · ${partyById.get(selectedPriceList.linked_party)?.trade_name ?? partyById.get(selectedPriceList.linked_party)?.legal_name ?? "Persona/empresa"}` : ""}`
+                    : customerId
+                      ? "No hay lista enlazada a este cliente; se usará la lista general del centro si existe."
+                      : "Selecciona un cliente para cargar su lista de precios."}
+                </span>
+                {selectedPriceListItems.length > 0 && (
+                  <span style={{ fontSize: "0.76rem", color: "var(--muted)" }}>
+                    {selectedPriceListItems.length} material{selectedPriceListItems.length !== 1 ? "es" : ""} con precio enlazado.
+                  </span>
+                )}
+              </div>
             </div>
           </div>
+
+          {operation && (
+            <div className="section-panel">
+              <div className="section-panel-header">
+                <h3>Compra activa</h3>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="badge badge-green">Folio: {operation.folio}</span>
+                  <span className={`badge ${isCancelledOperation ? "badge-red" : confirmed ? "badge-green" : "badge-amber"}`}>
+                    {confirmed ? "Confirmada" : isCancelledOperation ? "Cancelada" : `Estado: ${operation.status}`}
+                  </span>
+                </div>
+              </div>
+              <div className="section-panel-body" style={{ display: "grid", gap: 12 }}>
+                <div className="info-banner" style={{ display: "grid", gap: 4 }}>
+                  <strong>{operation.customer_name ?? operation.customer_trade_name ?? operation.customer_legal_name ?? "Cliente"}</strong>
+                  <span>Centro: {center?.name ?? "—"}</span>
+                  <span>Vehiculo: {operation.vehicle_plate ?? plateInput ?? "—"}</span>
+                  <span>Conductor: {operation.driver_name ?? "—"}</span>
+                  <span>Total: {fmtMXN(totalAmount)} · Pagado: {fmtMXN(parseFloat(operation.paid_amount ?? "0") || 0)} · Pendiente: {fmtMXN(parseFloat(operation.pending_amount ?? "0") || 0)}</span>
+                </div>
+                {!isCancelledOperation ? (
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button className="btn-secondary" onClick={printTicket} disabled={!canManagePurchases}>
+                      Imprimir ticket
+                    </button>
+                    {canCancelOperation && (
+                      <button className="btn-ghost" onClick={cancelOperation} disabled={!canManagePurchases || confirming}>
+                        Cancelar compra
+                      </button>
+                    )}
+                    <button className="btn-ghost" onClick={startNew} disabled={!canManagePurchases}>
+                      Nueva compra
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button className="btn-ghost" onClick={startNew}>
+                      Nueva compra
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Vehicle weighing history */}
           {selectedVehicleId && (
@@ -945,12 +1184,12 @@ export function PurchasePage() {
                 <h3>Historial de pesajes del vehículo</h3>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   {vehicleHistoryLoading
-                    ? <span className="muted" style={{ fontSize: "0.78rem" }}>Cargando…</span>
+                    ? <span className="muted" style={{ fontSize: "0.78rem" }}>Cargando...</span>
                     : <span className="badge badge-gray">{vehicleHistory.length} sesión{vehicleHistory.length !== 1 ? "es" : ""}</span>
                   }
                   {historyStats && !vehicleHistoryLoading && (
                     <span className="badge badge-blue" style={{ fontSize: "0.68rem" }} title={`Promedio de ${historyStats.count} sesiones completadas`}>
-                      ⌀ neto {fmtKg(historyStats.avgNetKg)} kg
+                      <span className="badge badge-blue" style={{ fontSize: "0.68rem" }} title={`Promedio de ${historyStats.count} sesiones completadas`}>Promedio neto {fmtKg(historyStats.avgNetKg)} kg</span>
                     </span>
                   )}
                 </div>
@@ -1103,7 +1342,7 @@ export function PurchasePage() {
                     style={{ borderColor: !materialId && diffStep === "cycling" ? "rgba(239,68,68,0.5)" : undefined }}
                   >
                     <option value="">— Seleccionar —</option>
-                    {filteredMaterials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    {filteredMaterials.map((m) => <option key={m.id} value={m.id}>{materialOptionLabel(m)}</option>)}
                   </select>
                 </label>
               </div>
@@ -1143,7 +1382,7 @@ export function PurchasePage() {
                     <div className="scale-status-row">
                       <div className={`scale-dot ${!liveReading ? "disconnected" : isDisc ? "disconnected" : liveStable ? "stable" : "unstable"}`} />
                       <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
-                        {!liveReading ? "Sin lectura" : isDisc ? "Desconectada" : liveStable ? "Estable ✓" : "Oscilando…"}
+                        {!liveReading ? "Sin lectura" : isDisc ? "Desconectada" : liveStable ? "Estable ✓" : "Oscilando..."}
                       </span>
                     </div>
                   </div>
@@ -1157,19 +1396,20 @@ export function PurchasePage() {
                           className={autoRead ? "btn-danger" : "btn-secondary"}
                           style={{ flex: 1 }}
                           onClick={() => setAutoRead((v) => !v)}
+                          disabled={!canManagePurchases}
                         >
-                          {autoRead ? "⏹ Pausar báscula" : "▶ Leer báscula"}
+                          {autoRead ? "⏸ Pausar báscula" : "▶ Leer báscula"}
                         </button>
 
                         {method === "vehicle_differential" && diffStep === "idle" && (
                           <button
                             className="btn-primary"
                             style={{ flex: 1 }}
-                            disabled={!canCaptureGross}
+                            disabled={!canManagePurchases || !canCaptureGross}
                             onClick={captureGross}
                             title="Captura el peso inicial (vehículo cargado). No necesitas seleccionar material todavía."
                           >
-                            ⬆ Capturar peso inicial
+                            ⬇ Capturar peso inicial
                           </button>
                         )}
 
@@ -1177,7 +1417,7 @@ export function PurchasePage() {
                           <button
                             className="btn-primary"
                             style={{ flex: 1 }}
-                            disabled={!canCaptureTare}
+                            disabled={!canManagePurchases || !canCaptureTare}
                             onClick={captureTare}
                             title="Captura la tara cuando el vehículo haya descargado el material"
                           >
@@ -1185,13 +1425,14 @@ export function PurchasePage() {
                           </button>
                         )}
                         {method === "vehicle_differential" && diffStep === "cycling" && capturedTareKg && (
-                          <button
-                            className="btn-primary"
-                            style={{ flex: 1 }}
-                            disabled={!canAddItemDiff || itemLoading}
-                            onClick={addItemDiff}
-                          >
-                            {itemLoading ? "Guardando…" : "+ Agregar partida"}
+                        <button
+                          className="btn-primary"
+                          style={{ flex: 1 }}
+                          type="button"
+                          disabled={!canManagePurchases || !canAddItemDiff || itemLoading}
+                          onClick={addItemDiff}
+                        >
+                            {itemLoading ? "Guardando..." : "+ Agregar partida"}
                           </button>
                         )}
 
@@ -1199,7 +1440,8 @@ export function PurchasePage() {
                           <button
                             className="btn-primary"
                             style={{ flex: 1 }}
-                            disabled={!canCaptureDirect && !!materialId}
+                            type="button"
+                            disabled={!canManagePurchases || (!canCaptureDirect && !!materialId)}
                             onClick={captureDirectReading}
                           >
                             ✓ Capturar lectura
@@ -1399,29 +1641,29 @@ export function PurchasePage() {
               {method !== "vehicle_differential" && (
                 <button
                   className="btn-primary"
-                  disabled={(!canAddItemManual && !canAddItemDirect) || itemLoading || confirmed}
+                  disabled={!canManagePurchases || ((!canAddItemManual && !canAddItemDirect) || itemLoading || confirmed)}
                   onClick={addItem}
                   style={{ fontSize: "1rem", padding: "12px" }}
                 >
-                  {itemLoading ? "Guardando…" : `+ Agregar partida${netClean > 0 ? ` — ${fmtKg(netClean)} kg · ${fmtMXN(estimatedAmount)}` : ""}`}
+                  {itemLoading ? "Guardando..." : `+ Agregar partida${netClean > 0 ? ` — ${fmtKg(netClean)} kg · ${fmtMXN(estimatedAmount)}` : ""}`}
                 </button>
               )}
             </div>
           </div>
         </div>
 
-        {/* ── RIGHT COLUMN ─────────────────────────────────────── */}
+        {/* RIGHT COLUMN */}
         <div style={{ display: "grid", gap: 16 }}>
 
           {/* Items table */}
           <div className="section-panel">
             <div className="section-panel-header">
-              <h3>③ Partidas registradas</h3>
+              <h3>Partidas registradas</h3>
               <span className="badge badge-gray">{items.length} partida{items.length !== 1 ? "s" : ""}</span>
             </div>
             {items.length === 0 ? (
               <div style={{ padding: "24px 20px", textAlign: "center" }}>
-                <div style={{ fontSize: "2rem", marginBottom: 8 }}>⚖</div>
+                <div style={{ fontSize: "2rem", marginBottom: 8 }}>○</div>
                 <p className="muted" style={{ margin: 0 }}>
                   {!operation ? "Inicia una compra para registrar partidas." : "Aún no hay partidas."}
                 </p>
@@ -1461,7 +1703,7 @@ export function PurchasePage() {
                               <span>{fmtKg(mermaKgVal)}</span>
                               <span style={{ fontSize: "0.72rem", marginLeft: 4, opacity: 0.75 }}>({mermaPct.toFixed(1)}%)</span>
                             </>
-                          ) : <span>—</span>}
+                           ) : <span>—</span>}
                         </td>
                         <td style={{ color: "var(--muted)" }}>{fmtMXN(parseFloat(item.unit_price))}</td>
                         <td style={{ fontWeight: 700, color: "var(--accent-2)" }}>{fmtMXN(parseFloat(item.amount))}</td>
@@ -1469,9 +1711,9 @@ export function PurchasePage() {
                           {!confirmed && (
                             <div style={{ display: "flex", gap: 4 }}>
                               <button className="btn-ghost" style={{ fontSize: "0.72rem", padding: "3px 8px" }}
-                                onClick={() => startEditItem(item)} title="Editar partida">✏</button>
+                                onClick={() => startEditItem(item)} title="Editar partida" disabled={!canManagePurchases}>✏</button>
                               <button className="btn-ghost" style={{ fontSize: "0.72rem", padding: "3px 8px", color: "var(--danger)" }}
-                                onClick={() => deleteItem(item.id)} title="Eliminar partida" disabled={itemLoading}>🗑</button>
+                                onClick={() => deleteItem(item.id)} title="Eliminar partida" disabled={!canManagePurchases || itemLoading}>🗑</button>
                             </div>
                           )}
                         </td>
@@ -1482,7 +1724,7 @@ export function PurchasePage() {
                 <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border)", background: "var(--panel-2)", display: "grid", gap: 6 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                      {items.length} partida{items.length !== 1 ? "s" : ""} · {fmtKg(totalWeight)} kg
+                       {items.length} partida{items.length !== 1 ? "s" : ""} · {fmtKg(totalWeight)} kg
                     </span>
                     <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--accent-2)" }}>{fmtMXN(totalAmount)}</span>
                   </div>
@@ -1503,7 +1745,7 @@ export function PurchasePage() {
             <div className="section-panel">
               <div className="section-panel-header">
                 <h3>Editar partida</h3>
-                <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={() => setEditState(null)}>✕ Cancelar</button>
+                <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={() => setEditState(null)} disabled={!canManagePurchases}>Cancelar</button>
               </div>
               <div className="section-panel-body" style={{ display: "grid", gap: 10 }}>
                 <label>
@@ -1539,26 +1781,30 @@ export function PurchasePage() {
                 {itemMsg && itemMsg.toLowerCase().includes("error") && (
                   <div className="error-banner">{itemMsg}</div>
                 )}
-                <button className="btn-primary" onClick={saveEditItem} disabled={itemLoading}>
-                  {itemLoading ? "Guardando…" : "Guardar cambios"}
+                <button className="btn-primary" onClick={saveEditItem} disabled={!canManagePurchases || itemLoading}>
+                  {itemLoading ? "Guardando..." : "Guardar cambios"}
                 </button>
               </div>
             </div>
           )}
 
           {/* Confirm section */}
-          {operation && items.length > 0 && !confirmed && (
+          {operation && items.length > 0 && !confirmed && operation.status !== "cancelled" && (
             <div className="section-panel">
-              <div className="section-panel-header"><h3>④ Cerrar compra</h3></div>
+                <div className="section-panel-header"><h3>Cerrar compra</h3></div>
               <div className="section-panel-body" style={{ display: "grid", gap: 10 }}>
                 <div style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                  Revisa las partidas antes de confirmar. Una vez confirmada no se pueden agregar más partidas sin ajuste auditado.
+                  Revisa las partidas antes de imprimir el ticket. La compra se confirma cuando el pago queda liquidado en caja.
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button className="btn-primary" style={{ flex: 1 }} onClick={confirmOp} disabled={confirming || itemLoading}>
-                    {confirming ? "Confirmando…" : "✓ Confirmar compra"}
+                  <button className="btn-primary" style={{ flex: 1 }} onClick={printTicket} disabled={!canManagePurchases || confirming || itemLoading}>
+                    {confirming ? "Procesando..." : "Imprimir ticket"}
                   </button>
-                  <button className="btn-secondary" onClick={printTicket}>🖨 Ticket provisional</button>
+                  {canCancelOperation && (
+                    <button className="btn-ghost" onClick={cancelOperation} disabled={!canManagePurchases || confirming}>
+                      Cancelar compra
+                    </button>
+                  )}
                 </div>
                 {printMsg && <div className="info-banner">{printMsg}</div>}
               </div>
@@ -1569,10 +1815,10 @@ export function PurchasePage() {
           {confirmed && operation && (
             <div className="section-panel">
               <div className="section-panel-header">
-                <h3>✓ Compra confirmada</h3>
+                  <h3>✓ Compra confirmada</h3>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn-secondary" style={{ fontSize: "0.8rem" }} onClick={printTicket}>🖨 Imprimir</button>
-                  <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={startNew}>Nueva compra</button>
+                  <button className="btn-secondary" style={{ fontSize: "0.8rem" }} onClick={printTicket} disabled={!canManagePurchases}>🖨 Imprimir</button>
+                  <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={startNew} disabled={!canManagePurchases}>Nueva compra</button>
                 </div>
               </div>
               <div className="section-panel-body" style={{ paddingTop: 12 }}>

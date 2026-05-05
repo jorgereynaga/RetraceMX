@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.apps import apps as django_apps
 from django.core.management.base import BaseCommand
 
 from apps.devices.models import Device
@@ -12,6 +13,7 @@ from apps.materials.models import Material, MaterialFamily, PriceList, PriceList
 from apps.logistics.models import Route
 from apps.parties.models import CommercialRole, CollectionCenter, Driver, PersonOrCompany, Vehicle
 from apps.users.models import Role
+from apps.users.role_permissions import assign_minimal_role_permissions
 
 
 FAMILIES_CATALOG = [
@@ -121,6 +123,26 @@ VEHICLES = [
 class Command(BaseCommand):
     help = "Creates a comprehensive demo dataset for Acopio360."
 
+    def ensure_demo_user(self, user_model, username: str, email: str, password: str, role_codes: list[str], *, is_staff: bool = False, is_superuser: bool = False) -> None:
+        user, created = user_model.objects.get_or_create(
+            username=username,
+            defaults={
+                "email": email,
+                "is_staff": is_staff,
+                "is_superuser": is_superuser,
+                "is_active": True,
+            },
+        )
+        user.email = email
+        user.is_staff = is_staff
+        user.is_superuser = is_superuser
+        user.is_active = True
+        if created or not user.has_usable_password():
+            user.set_password(password)
+        user.save()
+        if role_codes:
+            user.roles.set(Role.objects.filter(code__in=role_codes))
+
     def handle(self, *args, **options):
         user_model = get_user_model()
         username = os.getenv("DJANGO_SUPERUSER_USERNAME", "admin")
@@ -140,15 +162,52 @@ class Command(BaseCommand):
         admin_user.is_staff = True
         admin_user.is_superuser = True
         admin_user.is_active = True
-        if created:
-            admin_user.set_password(password)
-        elif not admin_user.has_usable_password():
-            admin_user.set_password(password)
+        admin_user.set_password(password)
         admin_user.save()
 
-        Role.objects.get_or_create(code="admin", defaults={"name": "Administrador"})
-        Role.objects.get_or_create(code="cashier", defaults={"name": "Caja"})
-        Role.objects.get_or_create(code="operator", defaults={"name": "Operador"})
+        role_definitions = [
+            ("superadmin", "Superadministrador"),
+            ("admin", "Administrador / Gerente"),
+            ("weighing", "Báscula / Recepción"),
+            ("purchasing", "Compras"),
+            ("inventory", "Inventarios / Almacén"),
+            ("cashier", "Caja"),
+            ("sales", "Ventas / Comercial"),
+            ("logistics", "Logística / Rutas"),
+            ("operator", "Operador / Chofer"),
+            ("auditor", "Auditor / Consulta"),
+        ]
+        for code, name in role_definitions:
+            Role.objects.get_or_create(code=code, defaults={"name": name})
+        admin_roles = Role.objects.filter(code__in=["superadmin", "admin"])
+        if admin_roles.exists():
+            admin_user.roles.set(admin_roles)
+        assign_minimal_role_permissions(django_apps)
+
+        demo_user_password = os.getenv("DJANGO_DEMO_USER_PASSWORD", "Demo1234!")
+        superuser_password = password
+        demo_users = [
+            {"username": "superadmin", "email": "superadmin@acopio360.local", "roles": ["superadmin"], "is_staff": True, "is_superuser": True, "password": superuser_password},
+            {"username": "admin", "email": "admin@acopio360.local", "roles": ["superadmin", "admin"], "is_staff": True, "is_superuser": True, "password": superuser_password},
+            {"username": "weighing", "email": "weighing@acopio360.local", "roles": ["weighing"], "password": demo_user_password},
+            {"username": "purchasing", "email": "purchasing@acopio360.local", "roles": ["purchasing"], "password": demo_user_password},
+            {"username": "inventory", "email": "inventory@acopio360.local", "roles": ["inventory"], "password": demo_user_password},
+            {"username": "cashier", "email": "cashier@acopio360.local", "roles": ["cashier"], "password": demo_user_password},
+            {"username": "sales", "email": "sales@acopio360.local", "roles": ["sales"], "password": demo_user_password},
+            {"username": "logistics", "email": "logistics@acopio360.local", "roles": ["logistics"], "password": demo_user_password},
+            {"username": "operator", "email": "operator@acopio360.local", "roles": ["operator"], "password": demo_user_password},
+            {"username": "auditor", "email": "auditor@acopio360.local", "roles": ["auditor"], "password": demo_user_password},
+        ]
+        for demo in demo_users:
+            self.ensure_demo_user(
+                user_model,
+                demo["username"],
+                demo["email"],
+                demo["password"],
+                demo["roles"],
+                is_staff=demo.get("is_staff", False),
+                is_superuser=demo.get("is_superuser", False),
+            )
 
         CommercialRole.objects.get_or_create(code="customer", defaults={"name": "Cliente"})
         CommercialRole.objects.get_or_create(code="generator", defaults={"name": "Generador"})

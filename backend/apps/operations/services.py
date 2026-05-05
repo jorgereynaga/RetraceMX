@@ -11,7 +11,7 @@ from apps.core.utils import generate_folio
 from apps.devices.models import Device
 from apps.inventory.models import InventoryMovement
 from apps.inventory.services import create_inventory_movement
-from apps.payments.services import sync_payment_status
+from apps.payments.services import calculate_paid_amount, sync_payment_status
 from apps.weighing.models import WeighingSession
 
 from .models import PurchaseOperation, TicketItem
@@ -40,6 +40,12 @@ def recalculate_operation_total(operation: PurchaseOperation) -> PurchaseOperati
     operation.total_amount = sum((item.amount for item in items), Decimal("0")).quantize(Decimal("0.01"))
     operation.save(update_fields=["total_weight_kg", "total_merma_kg", "total_amount", "updated_at"])
     return operation
+
+
+def calculate_operation_balance(operation: PurchaseOperation) -> tuple[Decimal, Decimal]:
+    paid_amount = calculate_paid_amount(operation)
+    pending_amount = max(Decimal(operation.total_amount) - paid_amount, Decimal("0"))
+    return paid_amount, pending_amount
 
 
 @transaction.atomic
@@ -74,7 +80,16 @@ def open_purchase_operation(*, collection_center, customer, opened_by, route=Non
 
 
 @transaction.atomic
-def change_operation_status(operation: PurchaseOperation, new_status: str, user=None, reason: str = "") -> PurchaseOperation:
+def change_operation_status(
+    operation: PurchaseOperation,
+    new_status: str,
+    user=None,
+    reason: str = "",
+    close_reason: str = "",
+    close_notes: str = "",
+    close_authorized_by=None,
+    close_recognized_pending_amount: Decimal | None = None,
+) -> PurchaseOperation:
     valid_transitions = {
         PurchaseOperation.Status.DRAFT: {PurchaseOperation.Status.OPEN, PurchaseOperation.Status.CANCELLED},
         PurchaseOperation.Status.OPEN: {PurchaseOperation.Status.REGISTERED, PurchaseOperation.Status.CONFIRMED, PurchaseOperation.Status.CANCELLED},
@@ -85,8 +100,15 @@ def change_operation_status(operation: PurchaseOperation, new_status: str, user=
     }
     if new_status not in valid_transitions.get(operation.status, set()):
         raise ValidationError(f"No es posible cambiar de {operation.status} a {new_status}.")
+    if new_status == PurchaseOperation.Status.CONFIRMED and operation.payment_status != PurchaseOperation.PaymentStatus.PAID:
+        raise ValidationError("La compra solo puede confirmarse cuando esta pagada por completo.")
+    if new_status == PurchaseOperation.Status.CANCELLED:
+        active_payments = operation.payments.exclude(status__exact="cancelled").exists()
+        if operation.print_status != PurchaseOperation.PrintStatus.PENDING or operation.payment_status != PurchaseOperation.PaymentStatus.PENDING or active_payments:
+            raise ValidationError("No se puede cancelar una compra con ticket emitido o con pago registrado.")
     if new_status == PurchaseOperation.Status.COMPLETED and operation.payment_status != PurchaseOperation.PaymentStatus.PAID:
-        raise ValidationError("La operacion no puede cerrarse sin estar pagada por completo.")
+        if not getattr(user, "is_staff", False) and not getattr(user, "is_superuser", False):
+            raise ValidationError("La operacion no puede cerrarse sin estar pagada por completo.")
     operation.status = new_status
     now = timezone.now()
     if new_status == PurchaseOperation.Status.CONFIRMED:
@@ -94,14 +116,53 @@ def change_operation_status(operation: PurchaseOperation, new_status: str, user=
     elif new_status == PurchaseOperation.Status.COMPLETED:
         operation.completed_at = now
         operation.closed_by = user
+        paid_amount, pending_amount = calculate_operation_balance(operation)
+        if operation.payment_status != PurchaseOperation.PaymentStatus.PAID:
+            operation.close_authorized_by = close_authorized_by or user
+            operation.close_authorized_at = now
+            operation.close_authorization_reason = close_reason or reason
+            operation.close_authorization_notes = close_notes
+            operation.close_recognized_pending_amount = close_recognized_pending_amount if close_recognized_pending_amount is not None else pending_amount
+        else:
+            operation.close_authorized_by = None
+            operation.close_authorized_at = None
+            operation.close_authorization_reason = ""
+            operation.close_authorization_notes = ""
+            operation.close_recognized_pending_amount = Decimal("0")
     elif new_status == PurchaseOperation.Status.CANCELLED:
         operation.cancelled_at = now
         operation.closed_by = user
-    operation.save(update_fields=["status", "confirmed_at", "completed_at", "cancelled_at", "closed_by", "updated_at"])
+    operation.save(
+        update_fields=[
+            "status",
+            "confirmed_at",
+            "completed_at",
+            "cancelled_at",
+            "closed_by",
+            "close_authorized_by",
+            "close_authorized_at",
+            "close_authorization_reason",
+            "close_authorization_notes",
+            "close_recognized_pending_amount",
+            "updated_at",
+        ]
+    )
     closing_statuses = {PurchaseOperation.Status.CONFIRMED, PurchaseOperation.Status.COMPLETED, PurchaseOperation.Status.CANCELLED}
     if new_status in closing_statuses:
         operation.weighing_sessions.filter(status=WeighingSession.Status.OPEN).update(status=WeighingSession.Status.CLOSED, ended_at=now)
-    register_audit_event(actor=user, action="change_operation_status", entity=operation, details={"status": new_status, "reason": reason})
+    register_audit_event(
+        actor=user,
+        action="change_operation_status",
+        entity=operation,
+        details={
+            "status": new_status,
+            "reason": reason,
+            "close_reason": close_reason,
+            "close_notes": close_notes,
+            "close_authorized_by": str(close_authorized_by) if close_authorized_by else None,
+            "close_recognized_pending_amount": str(close_recognized_pending_amount) if close_recognized_pending_amount is not None else None,
+        },
+    )
     return operation
 
 

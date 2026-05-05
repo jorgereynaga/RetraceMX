@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
 
 from apps.core.models import UUIDTimeStampedModel
 
@@ -45,6 +46,13 @@ class PriceList(UUIDTimeStampedModel):
     code = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=120)
     collection_center = models.ForeignKey("parties.CollectionCenter", on_delete=models.PROTECT, related_name="price_lists")
+    linked_party = models.ForeignKey(
+        "parties.PersonOrCompany",
+        on_delete=models.PROTECT,
+        related_name="price_lists",
+        null=True,
+        blank=True,
+    )
     currency = models.CharField(max_length=8, default="MXN")
     valid_from = models.DateField()
     valid_to = models.DateField(null=True, blank=True)
@@ -52,6 +60,15 @@ class PriceList(UUIDTimeStampedModel):
 
     def __str__(self) -> str:
         return self.name
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["linked_party"],
+                condition=Q(linked_party__isnull=False),
+                name="unique_pricelist_per_party",
+            ),
+        ]
 
 
 class PriceListItem(UUIDTimeStampedModel):
@@ -62,4 +79,3 @@ class PriceListItem(UUIDTimeStampedModel):
 
     class Meta:
         unique_together = ("price_list", "material")
-

@@ -16,4 +16,6 @@ backend/media/
 backend/staticfiles/
 backend/.coverage
 backend/htmlcov/
-
+.local/
+.agents/
+*.log

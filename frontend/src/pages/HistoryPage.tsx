@@ -9,10 +9,21 @@ import { paginate } from "../utils/listing";
 function fmtMXN(v: number) {
   return "$" + v.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+function fmtKg(v: number) {
+  return v.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " kg";
+}
+
 function fmtDate(iso?: string) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("es-MX") + " " + d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+}
+
+function money(value?: string | number | null) {
+  const n = typeof value === "number" ? value : parseFloat(value ?? "0");
+  return Number.isFinite(n) ? n : 0;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -23,6 +34,24 @@ const STATUS_LABELS: Record<string, string> = {
   completed: "Completada",
   cancelled: "Cancelada",
 };
+
+const PAYMENT_LABELS: Record<string, string> = {
+  pending: "Pendiente",
+  partial: "Parcial",
+  paid: "Pagado",
+  cancelled: "Cancelado",
+  credit: "Crédito",
+};
+
+function statusBadge(status: string) {
+  if (status === "confirmed" || status === "completed") return "badge-green";
+  if (status === "cancelled") return "badge-red";
+  return "badge-gray";
+}
+
+function customerName(op: PurchaseOperation, party?: Party) {
+  return op.customer_name ?? op.customer_trade_name ?? op.customer_legal_name ?? party?.trade_name ?? party?.legal_name ?? "-";
+}
 
 export function HistoryPage() {
   const [operations, setOperations] = useState<PurchaseOperation[]>([]);
@@ -36,8 +65,13 @@ export function HistoryPage() {
   const [itemsLoading, setItemsLoading] = useState(false);
 
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [paymentFilter, setPaymentFilter] = useState("");
+  const [centerFilter, setCenterFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(15);
+  const [pageSize, setPageSize] = useState(15);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -84,24 +118,57 @@ export function HistoryPage() {
 
   const filteredOps = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return sortedOps;
+    const fromTime = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
+    const toTime = dateTo ? new Date(dateTo + "T23:59:59").getTime() : null;
+
     return sortedOps.filter((op) => {
-      const customer = partyById.get(op.customer);
+      const party = partyById.get(op.customer);
       const center = centerById.get(op.collection_center);
       const vehicle = op.vehicle ? vehicleById.get(op.vehicle) : null;
-      return (
-        op.folio.toLowerCase().includes(q) ||
-        (customer?.trade_name ?? customer?.legal_name ?? "").toLowerCase().includes(q) ||
-        (center?.name ?? "").toLowerCase().includes(q) ||
-        (vehicle?.plate_number ?? "").toLowerCase().includes(q) ||
-        (op.status ?? "").toLowerCase().includes(q)
-      );
+      const createdTime = op.created_at ? new Date(op.created_at).getTime() : null;
+
+      if (statusFilter && op.status !== statusFilter) return false;
+      if (paymentFilter && op.payment_status !== paymentFilter) return false;
+      if (centerFilter && op.collection_center !== centerFilter) return false;
+      if (fromTime && createdTime && createdTime < fromTime) return false;
+      if (toTime && createdTime && createdTime > toTime) return false;
+
+      if (!q) return true;
+      const haystack = [
+        op.folio,
+        customerName(op, party),
+        center?.name,
+        vehicle?.plate_number,
+        op.vehicle_plate,
+        op.driver_name,
+        op.opened_by_name,
+        op.status,
+        op.payment_status,
+        op.print_status,
+      ].join(" ").toLowerCase();
+
+      return haystack.includes(q);
     });
-  }, [sortedOps, search, partyById, centerById, vehicleById]);
+  }, [sortedOps, search, statusFilter, paymentFilter, centerFilter, dateFrom, dateTo, partyById, centerById, vehicleById]);
+
+  const stats = useMemo(() => {
+    return filteredOps.reduce(
+      (acc, op) => {
+        acc.total += 1;
+        acc.amount += money(op.total_amount);
+        acc.weight += money(op.total_weight_kg);
+        if (op.status === "cancelled") acc.cancelled += 1;
+        if (op.status === "confirmed" || op.status === "completed") acc.closed += 1;
+        if (op.payment_status && op.payment_status !== "paid") acc.pendingPayment += 1;
+        return acc;
+      },
+      { total: 0, amount: 0, weight: 0, cancelled: 0, closed: 0, pendingPayment: 0 },
+    );
+  }, [filteredOps]);
 
   const paginated = useMemo(() => paginate(filteredOps, page, pageSize), [filteredOps, page, pageSize]);
 
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, paymentFilter, centerFilter, dateFrom, dateTo, pageSize]);
 
   const selectedOp = useMemo(() => operations.find((o) => o.id === selectedId) ?? null, [operations, selectedId]);
 
@@ -120,123 +187,248 @@ export function HistoryPage() {
     return centerById.get(selectedOp.collection_center) ?? null;
   }, [selectedOp, centerById]);
 
+  const selectedSummary = useMemo(() => {
+    const weight = selectedItems.reduce((sum, item) => sum + money(item.net_weight_kg), 0);
+    const amount = selectedItems.reduce((sum, item) => sum + money(item.amount), 0);
+    return { weight, amount };
+  }, [selectedItems]);
+
   return (
     <Page title="Historial de compras">
-      <div style={{ display: "grid", gridTemplateColumns: selectedId ? "1fr 420px" : "1fr", gap: 20, alignItems: "start" }}>
-
-        {/* Left: list */}
-        <div>
-          <div className="metric-panel" style={{ marginBottom: 12 }}>
-            <label className="search-box">
-              Búsqueda rápida
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Folio, cliente, placa, centro…"
-              />
-            </label>
-          </div>
-
-          {loading ? (
-            <div className="info-banner">Cargando operaciones…</div>
-          ) : (
-            <>
-              <table className="table" style={{ cursor: "pointer" }}>
-                <thead>
-                  <tr>
-                    <th>Folio</th>
-                    <th>Fecha</th>
-                    <th>Cliente</th>
-                    <th>Placa</th>
-                    <th>Centro</th>
-                    <th>Encargado</th>
-                    <th>Conductor</th>
-                    <th>Estado</th>
-                    <th style={{ textAlign: "right" }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated.items.map((op) => {
-                    const customer = partyById.get(op.customer);
-                    const center = centerById.get(op.collection_center);
-                    const vehicle = op.vehicle ? vehicleById.get(op.vehicle) : null;
-                    const isSelected = op.id === selectedId;
-                    return (
-                      <tr
-                        key={op.id}
-                        onClick={() => setSelectedId(isSelected ? null : op.id)}
-                        style={{
-                          background: isSelected ? "var(--accent-dim)" : undefined,
-                          outline: isSelected ? "1px solid rgba(34,197,94,0.3)" : undefined,
-                        }}
-                      >
-                        <td style={{ fontWeight: 600, fontFamily: "monospace" }}>{op.folio}</td>
-                        <td style={{ fontSize: "0.8rem", color: "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(op.created_at)}</td>
-                        <td style={{ fontWeight: 500 }}>{customer?.trade_name ?? customer?.legal_name ?? "—"}</td>
-                        <td>{vehicle?.plate_number ?? "—"}</td>
-                        <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{center?.name ?? "—"}</td>
-                        <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.opened_by_name ?? "—"}</td>
-                        <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.driver_name ?? "—"}</td>
-                        <td>
-                          <span className={`badge ${op.status === "confirmed" || op.status === "completed" ? "badge-green" : op.status === "cancelled" ? "badge-red" : "badge-gray"}`} style={{ fontSize: "0.7rem" }}>
-                            {STATUS_LABELS[op.status] ?? op.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: 700, color: "var(--accent-2)" }}>
-                          {fmtMXN(parseFloat(op.total_amount) || 0)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {paginated.items.length === 0 && (
-                    <tr>
-                      <td colSpan={9} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
-                        Sin resultados
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-              <Pagination {...paginated} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={() => {}} />
-            </>
-          )}
+      <div style={{ display: "grid", gap: 16 }}>
+        <div className="info-banner">
+          Vista de auditoría: aquí solo se consulta el historial. Las compras no se reabren ni se modifican desde esta sección.
         </div>
 
-        {/* Right: ticket detail */}
-        {selectedId && selectedOp && (
-          <div className="section-panel" style={{ position: "sticky", top: 16 }}>
-            <div className="section-panel-header">
-              <h3 style={{ fontFamily: "monospace" }}>{selectedOp.folio}</h3>
-              <button className="btn-ghost" style={{ fontSize: "0.8rem" }} onClick={() => setSelectedId(null)}>✕</button>
-            </div>
-            <div className="section-panel-body" style={{ paddingTop: 12 }}>
-              {itemsLoading ? (
-                <div style={{ textAlign: "center", color: "var(--muted)", padding: "20px 0" }}>
-                  Cargando partidas…
-                </div>
-              ) : selectedItems.length === 0 ? (
-                <div style={{ textAlign: "center", color: "var(--muted)", padding: "20px 0" }}>
-                  No hay partidas registradas
-                </div>
-              ) : (
-                <TicketViewer
-                  operation={selectedOp}
-                  items={selectedItems}
-                  center={selectedCenter}
-                  customer={selectedCustomer}
-                  vehicle={selectedVehicle}
-                  materialById={materialById}
-                />
-              )}
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 16 }}>
+          <div className="metric-panel">
+            <span className="metric-label">Operaciones filtradas</span>
+            <strong className="metric-value">{stats.total.toLocaleString("es-MX")}</strong>
+          </div>
+          <div className="metric-panel">
+            <span className="metric-label">Importe auditado</span>
+            <strong className="metric-value">{fmtMXN(stats.amount)}</strong>
+          </div>
+          <div className="metric-panel">
+            <span className="metric-label">Kg auditados</span>
+            <strong className="metric-value">{fmtKg(stats.weight)}</strong>
+          </div>
+          <div className="metric-panel">
+            <span className="metric-label">Con pago pendiente</span>
+            <strong className="metric-value">{stats.pendingPayment.toLocaleString("es-MX")}</strong>
+          </div>
+        </div>
 
-              <div style={{ marginTop: 12, display: "grid", gap: 6, fontSize: "0.78rem", color: "var(--muted)" }}>
-                <div>Partidas: <strong style={{ color: "var(--text)" }}>{selectedItems.length}</strong></div>
-                <div>Pago: <strong style={{ color: "var(--text)" }}>{selectedOp.payment_status}</strong></div>
-                <div>Impresión: <strong style={{ color: "var(--text)" }}>{selectedOp.print_status}</strong></div>
-              </div>
+        <div className="section-panel">
+          <div className="section-panel-header">
+            <h3>Filtros de auditoría</h3>
+            <span className="badge badge-gray">{filteredOps.length.toLocaleString("es-MX")} registros</span>
+          </div>
+          <div className="section-panel-body">
+            <div style={{ display: "grid", gridTemplateColumns: "2fr repeat(5, minmax(130px, 1fr))", gap: 12 }}>
+              <label className="search-box">
+                Buscar
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Folio, cliente, placa, conductor, usuario..."
+                />
+              </label>
+              <label className="search-box">
+                Estado
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                  <option value="">Todos</option>
+                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="search-box">
+                Pago
+                <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+                  <option value="">Todos</option>
+                  {Object.entries(PAYMENT_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="search-box">
+                Centro
+                <select value={centerFilter} onChange={(e) => setCenterFilter(e.target.value)}>
+                  <option value="">Todos</option>
+                  {centers.map((center) => (
+                    <option key={center.id} value={center.id}>{center.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="search-box">
+                Desde
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </label>
+              <label className="search-box">
+                Hasta
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
             </div>
           </div>
-        )}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: selectedId ? "1fr 440px" : "1fr", gap: 20, alignItems: "start" }}>
+          <div className="section-panel">
+            <div className="section-panel-header">
+              <h3>Bitácora histórica de compras</h3>
+              <span className="badge badge-gray">Solo lectura</span>
+            </div>
+            <div className="section-panel-body" style={{ padding: 0 }}>
+              {loading ? (
+                <div className="info-banner" style={{ margin: 16 }}>Cargando operaciones...</div>
+              ) : (
+                <>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Folio</th>
+                        <th>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Placa</th>
+                        <th>Centro</th>
+                        <th>Encargado</th>
+                        <th>Conductor</th>
+                        <th>Estado</th>
+                        <th>Pago</th>
+                        <th style={{ textAlign: "right" }}>Total</th>
+                        <th>Auditoría</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginated.items.map((op) => {
+                        const party = partyById.get(op.customer);
+                        const center = centerById.get(op.collection_center);
+                        const vehicle = op.vehicle ? vehicleById.get(op.vehicle) : null;
+                        const isSelected = op.id === selectedId;
+                        return (
+                          <tr
+                            key={op.id}
+                            style={{
+                              background: isSelected ? "var(--accent-dim)" : undefined,
+                              outline: isSelected ? "1px solid rgba(34,197,94,0.3)" : undefined,
+                            }}
+                          >
+                            <td style={{ fontWeight: 700, fontFamily: "monospace" }}>{op.folio}</td>
+                            <td style={{ fontSize: "0.8rem", color: "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(op.created_at)}</td>
+                            <td style={{ fontWeight: 500 }}>{customerName(op, party)}</td>
+                            <td>{vehicle?.plate_number ?? op.vehicle_plate ?? "-"}</td>
+                            <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{center?.name ?? "-"}</td>
+                            <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.opened_by_name ?? "-"}</td>
+                            <td style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{op.driver_name ?? "-"}</td>
+                            <td>
+                              <span className={`badge ${statusBadge(op.status)}`} style={{ fontSize: "0.7rem" }}>
+                                {STATUS_LABELS[op.status] ?? op.status}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="badge badge-gray" style={{ fontSize: "0.7rem" }}>
+                                {op.payment_status_label ?? PAYMENT_LABELS[op.payment_status] ?? op.payment_status ?? "-"}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right", fontWeight: 700, color: "var(--accent-2)" }}>
+                              {fmtMXN(money(op.total_amount))}
+                            </td>
+                            <td>
+                              <button className="btn-ghost" type="button" onClick={() => setSelectedId(isSelected ? null : op.id)}>
+                                {isSelected ? "Ocultar" : "Ver detalle"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {paginated.items.length === 0 && (
+                        <tr>
+                          <td colSpan={11} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
+                            Sin resultados para los filtros seleccionados.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div style={{ padding: "0 16px 16px" }}>
+                    <Pagination {...paginated} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {selectedId && selectedOp && (
+            <div className="section-panel" style={{ position: "sticky", top: 16 }}>
+              <div className="section-panel-header">
+                <div>
+                  <h3 style={{ fontFamily: "monospace" }}>{selectedOp.folio}</h3>
+                  <div style={{ color: "var(--muted)", fontSize: "0.8rem" }}>Detalle de auditoría, solo lectura</div>
+                </div>
+                <button className="btn-ghost" type="button" onClick={() => setSelectedId(null)}>Cerrar</button>
+              </div>
+              <div className="section-panel-body" style={{ display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div className="metric-panel">
+                    <span className="metric-label">Total operación</span>
+                    <strong>{fmtMXN(money(selectedOp.total_amount))}</strong>
+                  </div>
+                  <div className="metric-panel">
+                    <span className="metric-label">Peso total</span>
+                    <strong>{fmtKg(money(selectedOp.total_weight_kg))}</strong>
+                  </div>
+                  <div className="metric-panel">
+                    <span className="metric-label">Partidas</span>
+                    <strong>{selectedItems.length.toLocaleString("es-MX")}</strong>
+                  </div>
+                  <div className="metric-panel">
+                    <span className="metric-label">Estado pago</span>
+                    <strong>{selectedOp.payment_status_label ?? PAYMENT_LABELS[selectedOp.payment_status] ?? selectedOp.payment_status ?? "-"}</strong>
+                  </div>
+                </div>
+
+                <div className="info-banner" style={{ display: "grid", gap: 6 }}>
+                  <div><strong>Cliente:</strong> {customerName(selectedOp, selectedCustomer ?? undefined)}</div>
+                  <div><strong>Centro:</strong> {selectedCenter?.name ?? "-"}</div>
+                  <div><strong>Vehículo:</strong> {selectedVehicle?.plate_number ?? selectedOp.vehicle_plate ?? "-"}</div>
+                  <div><strong>Conductor:</strong> {selectedOp.driver_name ?? "-"}</div>
+                  <div><strong>Encargado:</strong> {selectedOp.opened_by_name ?? "-"}</div>
+                  <div><strong>Fecha de registro:</strong> {fmtDate(selectedOp.created_at)}</div>
+                  <div><strong>Estado operación:</strong> {STATUS_LABELS[selectedOp.status] ?? selectedOp.status}</div>
+                  <div><strong>Estado de impresión:</strong> {selectedOp.print_status ?? "-"}</div>
+                </div>
+
+                {itemsLoading ? (
+                  <div style={{ textAlign: "center", color: "var(--muted)", padding: "20px 0" }}>
+                    Cargando partidas...
+                  </div>
+                ) : selectedItems.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "var(--muted)", padding: "20px 0" }}>
+                    No hay partidas registradas.
+                  </div>
+                ) : (
+                  <>
+                    <div className="section-panel" style={{ boxShadow: "none" }}>
+                      <div className="section-panel-header">
+                        <h3>Resumen de partidas</h3>
+                        <span className="badge badge-gray">{fmtKg(selectedSummary.weight)} | {fmtMXN(selectedSummary.amount)}</span>
+                      </div>
+                    </div>
+                    <TicketViewer
+                      operation={selectedOp}
+                      items={selectedItems}
+                      center={selectedCenter}
+                      customer={selectedCustomer}
+                      vehicle={selectedVehicle}
+                      materialById={materialById}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </Page>
   );

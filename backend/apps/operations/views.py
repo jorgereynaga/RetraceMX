@@ -1,9 +1,11 @@
 from rest_framework import decorators, response, status, viewsets
+from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 
 from apps.auditing.services import register_audit_event
 from apps.evidence.services import register_print_event
 from apps.parties.models import CollectionCenter, Driver, PersonOrCompany, Vehicle
+from apps.users.permissions import RolePermission
 
 from .models import PurchaseOperation, TicketItem
 from .serializers import PurchaseOperationSerializer, TicketItemSerializer, TicketItemWriteSerializer
@@ -27,6 +29,14 @@ class PurchaseOperationViewSet(viewsets.ModelViewSet):
         "closed_by",
     ).prefetch_related("items", "payments", "weighing_sessions")
     serializer_class = PurchaseOperationSerializer
+    permission_classes = [IsAuthenticated, RolePermission]
+    permission_action_map = {
+        "open": ["operations.add_purchaseoperation"],
+        "update_driver": ["operations.change_purchaseoperation"],
+        "recalculate": ["operations.change_purchaseoperation"],
+        "status_change": ["operations.change_purchaseoperation"],
+        "print_ticket": ["operations.change_purchaseoperation", "evidence.add_printlog"],
+    }
 
     @decorators.action(detail=False, methods=["post"])
     def open(self, request):
@@ -81,7 +91,16 @@ class PurchaseOperationViewSet(viewsets.ModelViewSet):
     @decorators.action(detail=True, methods=["post"])
     def status_change(self, request, pk=None):
         operation = self.get_object()
-        operation = change_operation_status(operation, request.data["status"], user=request.user, reason=request.data.get("reason", ""))
+        operation = change_operation_status(
+            operation,
+            request.data["status"],
+            user=request.user,
+            reason=request.data.get("reason", ""),
+            close_reason=request.data.get("close_reason", ""),
+            close_notes=request.data.get("close_notes", ""),
+            close_authorized_by=request.user if request.data.get("authorize_close_with_pending") else None,
+            close_recognized_pending_amount=request.data.get("close_recognized_pending_amount"),
+        )
         return response.Response(self.get_serializer(operation).data)
 
     @decorators.action(detail=True, methods=["post"])
@@ -106,6 +125,11 @@ class TicketItemViewSet(viewsets.ModelViewSet):
     queryset = TicketItem.objects.select_related("operation", "material", "weighing_session", "scale_reading")
     serializer_class = TicketItemSerializer
     filterset_fields = ["operation"]
+    permission_classes = [IsAuthenticated, RolePermission]
+    permission_action_map = {
+        "adjust": ["operations.change_ticketitem"],
+        "confirm": ["operations.change_ticketitem"],
+    }
 
     def create(self, request, *args, **kwargs):
         serializer = TicketItemWriteSerializer(data=request.data)

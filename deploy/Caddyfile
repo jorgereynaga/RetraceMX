@@ -1,0 +1,9 @@
+retracemx.softwaresci.org {
+  encode zstd gzip
+  reverse_proxy frontend:80
+}
+
+apiretracemx.softwaresci.org {
+  encode zstd gzip
+  reverse_proxy backend:8000
+}

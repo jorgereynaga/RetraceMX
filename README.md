@@ -1,4 +1,4 @@
-# Acopio360
+# ReTrace MX
 
 Plataforma base de gestión operativa y trazabilidad para recicladoras.
 
@@ -51,11 +51,33 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-## Con Docker
+## Con Docker (desarrollo)
 
 ```bash
 docker compose up --build
 ```
+
+## Despliegue en servidor
+
+Para ReTrace MX en producción usa:
+
+1. Copia `.env.production.example` a `.env.production` y ajusta secretos.
+2. Apunta los DNS:
+   - `retracemx.softwaresci.org` -> `64.23.234.101`
+   - `apiretracemx.softwaresci.org` -> `64.23.234.101`
+3. Levanta la pila de producción:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+La pila de producción incluye:
+
+- backend Django con `gunicorn`,
+- frontend compilado en estático,
+- Caddy como reverse proxy con HTTPS automático para ambos subdominios.
+
+Si tu proveedor bloquea los puertos 80/443, abre esos puertos en el firewall del servidor.
 
 ## Cómo correr el frontend
 
@@ -67,7 +89,7 @@ npm run dev
 
 ## Variables de entorno
 
-Revisa `.env.example` para los valores esperados. El backend usa `DATABASE_URL`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS` y `DJANGO_CSRF_TRUSTED_ORIGINS`.
+Revisa `.env.example` para desarrollo y `.env.production.example` para servidor. El backend usa `DATABASE_URL`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` y `DJANGO_CORS_ALLOWED_ORIGINS`.
 
 ## Pruebas
 

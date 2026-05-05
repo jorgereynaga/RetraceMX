@@ -10,9 +10,18 @@ class CommercialRoleSerializer(serializers.ModelSerializer):
 
 
 class PersonOrCompanySerializer(serializers.ModelSerializer):
+    commercial_role_names = serializers.SerializerMethodField()
+    buyer_type_label = serializers.SerializerMethodField()
+
     class Meta:
         model = PersonOrCompany
         fields = "__all__"
+
+    def get_commercial_role_names(self, obj):
+        return [role.name for role in obj.commercial_roles.all()]
+
+    def get_buyer_type_label(self, obj):
+        return obj.get_kind_display()
 
 
 class VehicleSerializer(serializers.ModelSerializer):

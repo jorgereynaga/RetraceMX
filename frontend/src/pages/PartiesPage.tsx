@@ -6,6 +6,8 @@ import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
 import { matchesSearch, paginate } from "../utils/listing";
 import { sortByValue } from "../utils/listing";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 function kindLabel(kind: Party["kind"]) {
   return kind === "company" ? "Empresa" : "Persona";
@@ -27,6 +29,8 @@ function emptyForm() {
 }
 
 export function PartiesPage() {
+  const { user } = useAuth();
+  const canManageParties = userCan(user, "parties.manage");
   const [items, setItems] = useState<Party[]>([]);
   const [commercialRoles, setCommercialRoles] = useState<CommercialRole[]>([]);
   const [selectedPartyId, setSelectedPartyId] = useState("");
@@ -127,6 +131,10 @@ export function PartiesPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!canManageParties) {
+      setMessage("No tienes permiso para gestionar personas/empresas.");
+      return;
+    }
     setMessage(null);
     try {
       const payload = {
@@ -156,6 +164,13 @@ export function PartiesPage() {
 
   async function removeParty() {
     if (!selectedParty) return;
+    if (!canManageParties) {
+      setMessage("No tienes permiso para eliminar personas/empresas.");
+      return;
+    }
+    if (!window.confirm(`Seguro que deseas eliminar a ${selectedParty.legal_name}${selectedParty.trade_name ? ` (${selectedParty.trade_name})` : ""}? Esta accion no se puede deshacer.`)) {
+      return;
+    }
     setMessage(null);
     try {
       await api.partyDelete(selectedParty.id);
@@ -258,12 +273,12 @@ export function PartiesPage() {
             <textarea value={form.notes} onChange={(e) => updateField("notes", e.target.value)} rows={3} />
           </label>
           <div className="party-actions">
-            <button type="submit" className="ghost-button">{selectedParty ? "Actualizar" : "Crear"} persona/empresa</button>
+            <button type="submit" className="ghost-button" disabled={!canManageParties}>{selectedParty ? "Actualizar" : "Crear"} persona/empresa</button>
             <button type="button" className="ghost-button" onClick={() => { setSelectedPartyId(""); setForm(emptyForm()); }}>
               Limpiar
             </button>
             {selectedParty ? (
-              <button type="button" className="ghost-button" onClick={removeParty}>
+              <button type="button" className="ghost-button" onClick={removeParty} disabled={!canManageParties}>
                 Eliminar
               </button>
             ) : null}

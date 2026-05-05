@@ -25,7 +25,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || "Request failed");
+    let friendlyMessage: string | null = null;
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed && typeof parsed === "object") {
+        const detail = (parsed as { detail?: unknown }).detail;
+        if (typeof detail === "string" && detail.trim()) {
+          friendlyMessage = detail;
+        }
+      }
+    } catch {
+      // Fallback to raw text below.
+    }
+    throw new Error(friendlyMessage || message || "Request failed");
   }
   if (response.status === 204) {
     return undefined as T;
@@ -68,7 +80,7 @@ async function requestListAll<T>(initialPath: string): Promise<T[]> {
     all.push(...(payload.results ?? []));
     if (payload.next) {
       try {
-        const url: URL = new URL(payload.next);
+        const url: URL = new URL(payload.next, window.location.origin);
         const fullPath: string = url.pathname + url.search;
         currentPath = fullPath.startsWith(basePath) ? fullPath.slice(basePath.length) : fullPath;
       } catch {

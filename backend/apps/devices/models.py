@@ -10,6 +10,7 @@ class Device(UUIDTimeStampedModel):
         VEHICLE_SCALE = "vehicle_scale", "Vehicle Scale"
         SECONDARY_SCALE = "secondary_scale", "Secondary Scale"
         THERMAL_PRINTER = "thermal_printer", "Thermal Printer"
+        GPS_TRACKER = "gps_tracker", "GPS Tracker"
 
     name = models.CharField(max_length=120)
     identifier = models.CharField(max_length=120, unique=True)
@@ -20,7 +21,8 @@ class Device(UUIDTimeStampedModel):
     is_manual_fallback = models.BooleanField(default=False)
     metadata = models.JSONField(default=dict, blank=True)
     collection_center = models.ForeignKey("parties.CollectionCenter", on_delete=models.PROTECT, related_name="devices", null=True, blank=True)
+    vehicle = models.ForeignKey("parties.Vehicle", on_delete=models.SET_NULL, null=True, blank=True, related_name="gps_devices")
+    last_seen_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self) -> str:
         return self.name
-

@@ -32,9 +32,9 @@ from apps.payments.services import register_payment
 pytestmark = pytest.mark.django_db
 
 
-def build_user():
+def build_user(username="operator"):
     user_model = get_user_model()
-    return user_model.objects.create_user(username="operator", email="operator@example.com", password="testpass123")
+    return user_model.objects.create_user(username=username, email=f"{username}@example.com", password="testpass123")
 
 
 def build_context():
@@ -228,11 +228,31 @@ def test_payment_overflow_and_completion_requires_paid_status():
         user=user,
     )
 
-    with pytest.raises(ValidationError):
-        register_payment(operation=operation, amount=Decimal("150.00"), method="cash", received_by=user)
+    payment = register_payment(operation=operation, amount=Decimal("150.00"), method="cash", received_by=user)
+    payment.refresh_from_db()
+    operation.refresh_from_db()
+    assert payment.amount == Decimal("100.00")
+    assert payment.received_amount == Decimal("150.00")
+    assert payment.change_amount == Decimal("50.00")
+    assert operation.payment_status == PurchaseOperation.PaymentStatus.PAID
+
+    second_user = build_user("operator-2")
+    other_operation = open_purchase_operation(collection_center=center, customer=customer, opened_by=second_user)
+    register_ticket_item(
+        operation=other_operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("10.00"),
+        gross_weight_kg=Decimal("10"),
+        merma_kg=Decimal("0"),
+        user=second_user,
+    )
 
     with pytest.raises(ValidationError):
-        change_operation_status(operation, PurchaseOperation.Status.COMPLETED, user=user, reason="not paid yet")
+        register_payment(operation=other_operation, amount=Decimal("150.00"), method="transfer", received_by=second_user, reference="TRX-1")
+
+    with pytest.raises(ValidationError):
+        change_operation_status(other_operation, PurchaseOperation.Status.COMPLETED, user=second_user, reason="not paid yet")
 
 
 def test_sale_order_closes_and_reduces_stock():

@@ -13,9 +13,12 @@ import { PurchasePage } from "./pages/PurchasePage";
 import { WeighingPage } from "./pages/WeighingPage";
 import { TicketPage } from "./pages/TicketPage";
 import { CashierPage } from "./pages/CashierPage";
+import { InventoryPage } from "./pages/InventoryPage";
 import { SalesPage } from "./pages/SalesPage";
 import { LogisticsPage } from "./pages/LogisticsPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { SalesHistoryPage } from "./pages/SalesHistoryPage";
+import { UsersPage } from "./pages/UsersPage";
 
 export function App() {
   const { token } = useAuth();
@@ -39,9 +42,12 @@ export function App() {
         <Route path="/weighing" element={<WeighingPage />} />
         <Route path="/ticket" element={<TicketPage />} />
         <Route path="/cashier" element={<CashierPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/logistics" element={<LogisticsPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/sales-history" element={<SalesHistoryPage />} />
+        <Route path="/users" element={<UsersPage />} />
       </Route>
     </Routes>
   );

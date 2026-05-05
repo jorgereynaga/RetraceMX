@@ -7,11 +7,16 @@ import type {
   CollectionTripTelemetryPoint,
   CollectionTripStop,
   CommercialRole,
+  Delivery,
+  DeliveryItem,
+  DeliveryRouteStop,
   Driver,
   Device,
   EvidenceFile,
   MaterialFamily,
   Material,
+  InventoryMovement,
+  InventorySummary,
   Party,
   Payment,
   PrintLog,
@@ -22,15 +27,24 @@ import type {
   Route,
   SaleItem,
   SaleOrder,
+  SalePayment,
   ScaleReading,
+  Role,
   TicketItem,
   User,
   Vehicle,
   WeighingSession,
+  GPSPosition,
 } from "../types";
 
 export const api = {
   login: (username: string, password: string) => apiPost<{ token: string; user: User }>("/auth/login/", { username, password }),
+  users: () => apiListAll<User>("/users/"),
+  userCreate: (payload: Record<string, unknown>) => apiPost<User>("/users/", payload),
+  userUpdate: (id: string, payload: Record<string, unknown>) => apiPut<User>(`/users/${id}/`, payload),
+  userPatch: (id: string, payload: Record<string, unknown>) => apiPatch<User>(`/users/${id}/`, payload),
+  userDelete: (id: string) => apiDelete<void>(`/users/${id}/`),
+  roles: () => apiListAll<Role>("/roles/"),
   centers: () => apiList<CollectionCenter>("/collection-centers/"),
   centerCreate: (payload: Record<string, unknown>) => apiPost<CollectionCenter>("/collection-centers/", payload),
   centerUpdate: (id: string, payload: Record<string, unknown>) => apiPut<CollectionCenter>(`/collection-centers/${id}/`, payload),
@@ -45,8 +59,9 @@ export const api = {
   priceLists: () => apiList<PriceList>("/price-lists/"),
   priceListCreate: (payload: Record<string, unknown>) => apiPost<PriceList>("/price-lists/", payload),
   priceListUpdate: (id: string, payload: Record<string, unknown>) => apiPut<PriceList>(`/price-lists/${id}/`, payload),
+  priceListDuplicate: (id: string, payload: Record<string, unknown>) => apiPost<PriceList>(`/price-lists/${id}/duplicate/`, payload),
   priceListDelete: (id: string) => apiDelete<void>(`/price-lists/${id}/`),
-  priceListItems: () => apiList<PriceListItem>("/price-list-items/"),
+  priceListItems: () => apiListAll<PriceListItem>("/price-list-items/"),
   priceListItemCreate: (payload: Record<string, unknown>) => apiPost<PriceListItem>("/price-list-items/", payload),
   priceListItemUpdate: (id: string, payload: Record<string, unknown>) => apiPut<PriceListItem>(`/price-list-items/${id}/`, payload),
   priceListItemDelete: (id: string) => apiDelete<void>(`/price-list-items/${id}/`),
@@ -58,7 +73,8 @@ export const api = {
   partyPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Party>(`/parties/${id}/`, payload),
   partyDelete: (id: string) => apiDelete<void>(`/parties/${id}/`),
   parties: () => apiList<Party>("/parties/"),
-  materials: () => apiList<Material>("/materials/"),
+  materials: () => apiListAll<Material>("/materials/"),
+  materialsAll: () => apiListAll<Material>("/materials/"),
   vehicles: () => apiList<Vehicle>("/vehicles/"),
   vehiclesByOwner: (ownerId: string) => apiList<Vehicle>(`/vehicles/?owner=${encodeURIComponent(ownerId)}`),
   vehicleCreate: (payload: Record<string, unknown>) => apiPost<Vehicle>("/vehicles/", payload),
@@ -71,21 +87,27 @@ export const api = {
   operationsAll: () => apiListAll<PurchaseOperation>("/purchase-operations/"),
   operationDetail: (id: string) => apiGet<PurchaseOperation>(`/purchase-operations/${id}/`),
   operationCreate: (payload: Record<string, unknown>) => apiPost<PurchaseOperation>("/purchase-operations/open/", payload),
-  operationStatusChange: (id: string, status: string, reason = "") =>
-    apiPost<PurchaseOperation>(`/purchase-operations/${id}/status_change/`, { status, reason }),
+  operationStatusChange: (id: string, status: string, reason = "", extra: Record<string, unknown> = {}) =>
+    apiPost<PurchaseOperation>(`/purchase-operations/${id}/status_change/`, { status, reason, ...extra }),
   operationUpdateDriver: (id: string, driverId: string | null) =>
     apiPatch<PurchaseOperation>(`/purchase-operations/${id}/update_driver/`, { driver_id: driverId || null }),
   operationPrint: (id: string, payload: Record<string, unknown>) => apiPost<Record<string, unknown>>(`/purchase-operations/${id}/print_ticket/`, payload),
   ticketItems: () => apiList<TicketItem>("/ticket-items/"),
+  ticketItemsAll: () => apiListAll<TicketItem>("/ticket-items/"),
   ticketItemsByOperation: (operationId: string) => apiListAll<TicketItem>(`/ticket-items/?operation=${encodeURIComponent(operationId)}`),
   createTicketItem: (payload: Record<string, unknown>) => apiPost<TicketItem>("/ticket-items/", payload),
   updateTicketItem: (id: string, payload: Record<string, unknown>) => apiPut<TicketItem>(`/ticket-items/${id}/`, payload),
   adjustTicketItem: (id: string, payload: Record<string, unknown>) => apiPost<TicketItem>(`/ticket-items/${id}/adjust/`, payload),
   payments: () => apiList<Payment>("/payments/"),
+  paymentsAll: () => apiListAll<Payment>("/payments/"),
   createPayment: (payload: Record<string, unknown>) => apiPost<Payment>("/payments/", payload),
+  cancelPayment: (id: string, cancelReason = "") => apiPost<Payment>(`/payments/${id}/cancel/`, { cancel_reason: cancelReason }),
   printLogs: () => apiList<PrintLog>("/print-logs/"),
   reprintLog: (id: string) => apiPost<PrintLog>(`/print-logs/${id}/reprint/`, {}),
   auditLogs: () => apiList<AuditLog>("/audit-logs/"),
+  inventoryMovements: () => apiListAll<InventoryMovement>("/inventory-movements/"),
+  inventorySummary: () => apiGet<InventorySummary>("/inventory-movements/summary/"),
+  inventoryAdjust: (payload: Record<string, unknown>) => apiPost<InventoryMovement>("/inventory-movements/adjust/", payload),
   saleOrders: (params?: Record<string, string | undefined>) => {
     const query = params
       ? Object.entries(params)
@@ -96,7 +118,21 @@ export const api = {
     return apiList<SaleOrder>(query ? `/sale-orders/?${query}` : "/sale-orders/");
   },
   saleOrderOpen: (payload: Record<string, unknown>) => apiPost<SaleOrder>("/sale-orders/open/", payload),
+  saleOrderUpdate: (id: string, payload: Record<string, unknown>) => apiPatch<SaleOrder>(`/sale-orders/${id}/`, payload),
   saleOrderClose: (id: string) => apiPost<SaleOrder>(`/sale-orders/${id}/close/`, {}),
+  saleOrderDeliveries: (id: string) => apiList<Delivery>(`/sale-orders/${id}/deliveries/`),
+  saleOrderDeliveryCreate: (id: string, payload: Record<string, unknown>) => apiPost<Delivery>(`/sale-orders/${id}/deliveries/`, payload),
+  salePayments: (params?: Record<string, string | undefined>) => {
+    const query = params
+      ? Object.entries(params)
+          .filter(([, value]) => value)
+          .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value as string)}`)
+          .join("&")
+      : "";
+    return apiList<SalePayment>(query ? `/sale-payments/?${query}` : "/sale-payments/");
+  },
+  salePaymentCreate: (payload: Record<string, unknown>) => apiPost<SalePayment>("/sale-payments/", payload),
+  salePaymentCancel: (id: string, cancelReason = "") => apiPost<SalePayment>(`/sale-payments/${id}/cancel/`, { cancel_reason: cancelReason }),
   saleItems: () => apiList<SaleItem>("/sale-items/"),
   saleItemCreate: (payload: Record<string, unknown>) => apiPost<SaleItem>("/sale-items/", payload),
   saleStock: (collectionCenterId: string, materialId: string) =>
@@ -105,6 +141,9 @@ export const api = {
     ),
   collectionTrips: () => apiList<CollectionTrip>("/collection-trips/"),
   collectionTripCreate: (payload: Record<string, unknown>) => apiPost<CollectionTrip>("/collection-trips/", payload),
+  collectionTripAssignDelivery: (id: string, payload: Record<string, unknown>) => apiPost<Delivery>(`/collection-trips/${id}/assign-delivery/`, payload),
+  collectionTripLive: (id: string) => apiGet<{ trip: CollectionTrip; deliveries: Delivery[]; stops: DeliveryRouteStop[]; last_position: GPSPosition | null }>(`/collection-trips/${id}/live/`),
+  collectionTripGpsTrack: (id: string) => apiList<GPSPosition>(`/collection-trips/${id}/gps-track/`),
   collectionTripDepart: (id: string, payload: Record<string, unknown> = {}) => apiPost<CollectionTrip>(`/collection-trips/${id}/depart/`, payload),
   collectionTripArrive: (id: string, payload: Record<string, unknown> = {}) => apiPost<CollectionTrip>(`/collection-trips/${id}/arrive/`, payload),
   collectionTripClose: (id: string, payload: Record<string, unknown> = {}) => apiPost<CollectionTrip>(`/collection-trips/${id}/close/`, payload),
@@ -118,9 +157,24 @@ export const api = {
   collectionTripTelemetryPoints: (tripId?: string) =>
     apiList<CollectionTripTelemetryPoint>(tripId ? `/collection-trip-telemetry-points/?trip=${encodeURIComponent(tripId)}` : "/collection-trip-telemetry-points/"),
   collectionTripTelemetryPointCreate: (formData: FormData) => apiPostFormData<CollectionTripTelemetryPoint>("/collection-trip-telemetry-points/", formData),
-  priceSuggestion: (collectionCenterId: string, materialId: string) =>
+  deliveries: (params?: Record<string, string | undefined>) => {
+    const query = params
+      ? Object.entries(params)
+          .filter(([, value]) => value)
+          .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value as string)}`)
+          .join("&")
+      : "";
+    return apiList<Delivery>(query ? `/deliveries/?${query}` : "/deliveries/");
+  },
+  deliveryItems: (deliveryId?: string) => apiList<DeliveryItem>(deliveryId ? `/delivery-items/?delivery=${encodeURIComponent(deliveryId)}` : "/delivery-items/"),
+  deliveryAssign: (id: string, payload: Record<string, unknown>) => apiPost<Delivery>(`/deliveries/${id}/assign/`, payload),
+  deliveryStatus: (id: string, status: string, notes = "") => apiPost<Delivery>(`/deliveries/${id}/status/`, { status, notes }),
+  deliveryCancel: (id: string, notes = "") => apiPost<Delivery>(`/deliveries/${id}/cancel/`, { notes }),
+  deliveryRouteStops: () => apiList<DeliveryRouteStop>("/delivery-route-stops/"),
+  gpsPositions: () => apiList<GPSPosition>("/gps-positions/"),
+  priceSuggestion: (collectionCenterId: string, materialId: string, partyId?: string | null) =>
     apiGet<PriceSuggestion>(
-      `/price-suggestion/?collection_center_id=${encodeURIComponent(collectionCenterId)}&material_id=${encodeURIComponent(materialId)}`,
+      `/price-suggestion/?collection_center_id=${encodeURIComponent(collectionCenterId)}&material_id=${encodeURIComponent(materialId)}${partyId ? `&party_id=${encodeURIComponent(partyId)}` : ""}`,
     ),
   deviceSimulateScale: (deviceId: string) => apiGet<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; captured_at: string }>(`/devices/${deviceId}/simulate_scale/`),
   weighingSessionsByVehicle: (vehicleId: string, params?: { dateFrom?: string; dateTo?: string }) => {
@@ -140,8 +194,26 @@ export const api = {
       total_weight_kg: number;
       total_merma_kg: number;
       total_revenue: number;
+      volume_received_kg: number;
+      volume_sold_kg: number;
+      sale_revenue: number;
+      inventory_current_kg: number;
+      purchases_vs_sales: {
+        purchase_amount: number;
+        sale_amount: number;
+        balance_amount: number;
+      };
       by_family: Array<{ family_id: string; name: string; weight_kg: number; amount: number; items_count: number }>;
       by_client: Array<{ client_id: string; name: string; ops_count: number; weight_kg: number; amount: number }>;
-      trend_7d: Array<{ date: string; label: string; revenue: number; weight_kg: number; ops_count: number }>;
+      trend_7d: Array<{
+        date: string;
+        label: string;
+        purchase_revenue: number;
+        purchase_weight_kg: number;
+        sale_revenue: number;
+        sale_weight_kg: number;
+        purchase_ops_count: number;
+        sale_orders_count: number;
+      }>;
     }>(date ? `/reports/daily/?date=${date}` : "/reports/daily/"),
 };

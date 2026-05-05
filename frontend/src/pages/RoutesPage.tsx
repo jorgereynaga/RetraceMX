@@ -1,11 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/resources";
+import { RouteMap, type RouteMapPoint } from "../components/RouteMap";
 import type { CollectionCenter, Route } from "../types";
 import { Page } from "../components/Page";
 import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
 import { matchesSearch, paginate } from "../utils/listing";
 import { sortByValue } from "../utils/listing";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 function routeSummary(route: Route | undefined) {
   if (!route) return "-";
@@ -14,14 +17,19 @@ function routeSummary(route: Route | undefined) {
     route.destination_center_latitude && route.destination_center_longitude
       ? ` (${route.destination_center_latitude}, ${route.destination_center_longitude})`
       : "";
-  return `${route.code} · ${route.name} · ${route.origin_center_name ?? route.origin_center}${originCoords} → ${route.destination_center_name ?? route.destination_center}${destinationCoords}`;
+  return `${route.code} - ${route.name} - ${route.origin_center_name ?? route.origin_center}${originCoords} -> ${route.destination_center_name ?? route.destination_center}${destinationCoords}`;
 }
 
 function centerSummary(center: CollectionCenter | undefined) {
   if (!center) return "-";
   const kind = center.kind === "smelter" ? "Fundidora" : center.kind === "destination" ? "Destino" : "Acopio";
   const coordinates = center.latitude && center.longitude ? ` (${center.latitude}, ${center.longitude})` : "";
-  return `${center.code} · ${center.name} · ${kind}${coordinates}`;
+  return `${center.code} - ${center.name} - ${kind}${coordinates}`;
+}
+
+function formatCoordinates(latitude?: string | null, longitude?: string | null) {
+  if (!latitude || !longitude) return "-";
+  return `${latitude}, ${longitude}`;
 }
 
 function emptyForm() {
@@ -36,6 +44,8 @@ function emptyForm() {
 }
 
 export function RoutesPage() {
+  const { user } = useAuth();
+  const canManageRoutes = userCan(user, "routes.manage");
   const [items, setItems] = useState<Route[]>([]);
   const [centers, setCenters] = useState<CollectionCenter[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState("");
@@ -58,6 +68,15 @@ export function RoutesPage() {
 
   const selectedRoute = useMemo(() => items.find((route) => route.id === selectedRouteId) ?? null, [items, selectedRouteId]);
   const centerById = useMemo(() => Object.fromEntries(centers.map((center) => [center.id, center])), [centers]);
+  const selectedOriginCenter = useMemo(
+    () => (selectedRoute ? centerById[selectedRoute.origin_center] : undefined),
+    [centerById, selectedRoute],
+  );
+  const selectedDestinationCenter = useMemo(
+    () => (selectedRoute ? centerById[selectedRoute.destination_center] : undefined),
+    [centerById, selectedRoute],
+  );
+
   const filteredItems = useMemo(
     () =>
       items.filter((route) =>
@@ -85,6 +104,105 @@ export function RoutesPage() {
     return sortByValue(filteredItems, accessors[sortKey], sortDirection);
   }, [centerById, filteredItems, sortDirection, sortKey]);
   const paginatedItems = useMemo(() => paginate(sortedItems, page, pageSize), [page, pageSize, sortedItems]);
+
+  const routeMapPoints = useMemo<RouteMapPoint[]>(() => {
+    if (!selectedRoute) return [];
+    const originLat = selectedOriginCenter?.latitude ?? selectedRoute.origin_center_latitude;
+    const originLng = selectedOriginCenter?.longitude ?? selectedRoute.origin_center_longitude;
+    const destinationLat = selectedDestinationCenter?.latitude ?? selectedRoute.destination_center_latitude;
+    const destinationLng = selectedDestinationCenter?.longitude ?? selectedRoute.destination_center_longitude;
+    const points: Array<RouteMapPoint | null> = [
+      originLat && originLng
+        ? {
+            label: `${selectedRoute.code} origen`,
+            latitude: Number(originLat),
+            longitude: Number(originLng),
+            kind: "start",
+          }
+        : null,
+      destinationLat && destinationLng
+        ? {
+            label: `${selectedRoute.code} destino`,
+            latitude: Number(destinationLat),
+            longitude: Number(destinationLng),
+            kind: "end",
+          }
+        : null,
+    ];
+    return points.filter((point): point is RouteMapPoint => Boolean(point));
+  }, [selectedDestinationCenter, selectedOriginCenter, selectedRoute]);
+
+  function printRouteSheet() {
+    if (!selectedRoute) return;
+    const popup = window.open("", "_blank", "width=820,height=1100");
+    if (!popup) return;
+
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Ficha de ruta ${selectedRoute.code}</title>
+          <style>
+            @page { size: A4 portrait; margin: 12mm; }
+            body {
+              font-family: "Courier New", monospace;
+              font-size: 12px;
+              color: #111827;
+              margin: 0;
+              padding: 0;
+            }
+            .sheet { max-width: 760px; margin: 0 auto; }
+            .title { text-align: center; font-size: 22px; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px; }
+            .sub { text-align: center; font-size: 11px; margin-bottom: 12px; }
+            .line { border-top: 1px dashed #6b7280; margin: 10px 0; }
+            .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; }
+            .label { font-weight: 700; }
+            .section { margin-top: 14px; }
+            .section h2 { font-size: 14px; margin: 0 0 8px; text-transform: uppercase; }
+            .box { border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
+            .footer { margin-top: 16px; text-align: center; font-size: 11px; }
+          </style>
+        </head>
+        <body>
+          <div class="sheet">
+            <div class="title">FICHA DE RUTA</div>
+            <div class="sub">ACOPIO360 - Planeacion y control operativo</div>
+            <div class="line"></div>
+            <div class="grid">
+              <div><span class="label">Codigo:</span> ${selectedRoute.code}</div>
+              <div><span class="label">Activa:</span> ${selectedRoute.is_active ? "Si" : "No"}</div>
+              <div><span class="label">Nombre:</span> ${selectedRoute.name}</div>
+              <div><span class="label">Origen:</span> ${selectedRoute.origin_center_name ?? selectedRoute.origin_center}</div>
+              <div><span class="label">Destino:</span> ${selectedRoute.destination_center_name ?? selectedRoute.destination_center}</div>
+              <div><span class="label">Coordenadas origen:</span> ${formatCoordinates(selectedRoute.origin_center_latitude, selectedRoute.origin_center_longitude)}</div>
+              <div><span class="label">Coordenadas destino:</span> ${formatCoordinates(selectedRoute.destination_center_latitude, selectedRoute.destination_center_longitude)}</div>
+              <div><span class="label">Notas:</span> ${selectedRoute.notes || "-"}</div>
+            </div>
+            <div class="section">
+              <h2>Resumen operativo</h2>
+              <div class="box">
+                <div>Rutas activas: ${items.filter((route) => route.is_active).length}</div>
+                <div>Total de rutas: ${items.length}</div>
+                <div>Orígenes unicos: ${new Set(items.map((route) => route.origin_center)).size}</div>
+                <div>Destinos unicos: ${new Set(items.map((route) => route.destination_center)).size}</div>
+              </div>
+            </div>
+            <div class="section">
+              <h2>Trazabilidad</h2>
+              <div class="box">
+                <div>Ruta seleccionada desde la interfaz de Acopio360.</div>
+                <div>Origen operativo: ${selectedOriginCenter?.name ?? selectedRoute.origin_center_name ?? selectedRoute.origin_center}</div>
+                <div>Destino operativo: ${selectedDestinationCenter?.name ?? selectedRoute.destination_center_name ?? selectedRoute.destination_center}</div>
+              </div>
+            </div>
+            <div class="footer">Copia sin valor fiscal - Documento interno de planeacion</div>
+          </div>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  }
 
   useEffect(() => {
     setPage(1);
@@ -114,8 +232,8 @@ export function RoutesPage() {
         name: selectedRoute.name,
         origin_center: selectedRoute.origin_center,
         destination_center: selectedRoute.destination_center,
-        notes: "",
-        is_active: true,
+        notes: selectedRoute.notes ?? "",
+        is_active: selectedRoute.is_active,
       });
     } else {
       setForm(emptyForm());
@@ -128,6 +246,10 @@ export function RoutesPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!canManageRoutes) {
+      setMessage("No tienes permiso para gestionar rutas.");
+      return;
+    }
     setMessage(null);
     try {
       const payload = {
@@ -155,6 +277,10 @@ export function RoutesPage() {
 
   async function removeRoute() {
     if (!selectedRoute) return;
+    if (!canManageRoutes) {
+      setMessage("No tienes permiso para eliminar rutas.");
+      return;
+    }
     setMessage(null);
     try {
       await api.routeDelete(selectedRoute.id);
@@ -168,32 +294,110 @@ export function RoutesPage() {
   }
 
   return (
-    <Page title="Rutas" actions={<span className="muted">Orígenes y destinos con coordenadas geográficas</span>}>
+    <Page title="Rutas" actions={<span className="muted">Planeacion de origenes y destinos</span>}>
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
-      <section className="metric-panel" style={{ marginBottom: 16 }}>
-        <span>Catálogo de rutas</span>
-        <strong>{items.length}</strong>
-        <div className="muted" style={{ marginTop: 6 }}>
-          Planea recorridos entre centros de acopio, fundidoras y otros destinos operativos.
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 16 }}>
+        <div className="metric-panel">
+          <span>Rutas activas</span>
+          <strong>{items.filter((route) => route.is_active).length}</strong>
         </div>
-      </section>
+        <div className="metric-panel">
+          <span>Origenes</span>
+          <strong>{new Set(items.map((route) => route.origin_center)).size}</strong>
+        </div>
+        <div className="metric-panel">
+          <span>Destinos</span>
+          <strong>{new Set(items.map((route) => route.destination_center)).size}</strong>
+        </div>
+        <div className="metric-panel">
+          <span>Total rutas</span>
+          <strong>{items.length}</strong>
+        </div>
+      </div>
 
       <div className="metric-panel" style={{ marginBottom: 12 }}>
         <label className="search-box">
-          Búsqueda rápida
+          Busqueda rapida
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por código, nombre, origen, destino o notas"
+            placeholder="Buscar por codigo, nombre, origen, destino o notas"
           />
         </label>
       </div>
 
-      <form className="route-form" onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
-        <div className="route-form-row route-form-primary-row">
+      <table className="table">
+        <thead>
+          <tr>
+            <th><SortableHeader label="Codigo" active={sortKey === "code"} direction={sortDirection} onClick={() => toggleSort("code")} /></th>
+            <th><SortableHeader label="Nombre" active={sortKey === "name"} direction={sortDirection} onClick={() => toggleSort("name")} /></th>
+            <th><SortableHeader label="Origen" active={sortKey === "origin"} direction={sortDirection} onClick={() => toggleSort("origin")} /></th>
+            <th><SortableHeader label="Destino" active={sortKey === "destination"} direction={sortDirection} onClick={() => toggleSort("destination")} /></th>
+            <th>Coordenadas</th>
+            <th><SortableHeader label="Activa" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {paginatedItems.items.map((route) => {
+            const origin = centerById[route.origin_center];
+            const destination = centerById[route.destination_center];
+            return (
+              <tr
+                key={route.id}
+                onClick={() => setSelectedRouteId(route.id)}
+                style={{ cursor: "pointer", background: route.id === selectedRouteId ? "rgba(124, 58, 237, 0.12)" : undefined }}
+              >
+                <td>{route.code}</td>
+                <td>{route.name}</td>
+                <td>{route.origin_center_name ?? origin?.name ?? route.origin_center}</td>
+                <td>{route.destination_center_name ?? destination?.name ?? route.destination_center}</td>
+                <td>
+                  {origin?.latitude && origin?.longitude && destination?.latitude && destination?.longitude
+                    ? `${origin.latitude}, ${origin.longitude} -> ${destination.latitude}, ${destination.longitude}`
+                    : `${route.origin_center_latitude ?? "-"}, ${route.origin_center_longitude ?? "-"} -> ${route.destination_center_latitude ?? "-"}, ${route.destination_center_longitude ?? "-"}`}
+                </td>
+                <td>{route.is_active ? "Si" : "No"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      <Pagination {...paginatedItems} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
+
+
+      <section className="section-panel" style={{ marginBottom: 16 }}>
+        <div className="section-panel-header">
+          <h3>Planeacion de rutas</h3>
+          <span className="muted">Define origen, destino y notas operativas en una sola vista</span>
+        </div>
+        <div className="section-panel-body">
+          <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.15fr)", gap: 16 }}>
+            <div className="metric-panel" style={{ display: "grid", gap: 8 }}>
+              <span>Ruta seleccionada</span>
+              <strong>{selectedRoute ? routeSummary(selectedRoute) : "Selecciona una ruta"}</strong>
+              <div className="muted">Origen: {selectedRoute ? centerSummary(selectedOriginCenter) : "-"}</div>
+              <div className="muted">Destino: {selectedRoute ? centerSummary(selectedDestinationCenter) : "-"}</div>
+              <div className="muted">Notas: {selectedRoute?.notes || "-"}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                <button type="button" onClick={printRouteSheet} disabled={!canManageRoutes || !selectedRoute}>
+                  Imprimir ficha
+                </button>
+                <button type="button" onClick={() => selectedRoute && setMessage(`Ruta ${selectedRoute.code} lista para documento.`)} disabled={!canManageRoutes || !selectedRoute}>
+                  Preparar documento
+                </button>
+              </div>
+            </div>
+            <RouteMap points={routeMapPoints} title="Mapa de ruta" />
+          </div>
+        </div>
+      </section>
+
+      <form className="section-panel" onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
+        <div className="section-panel-body grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
           <label>
-            Código
+            Codigo
             <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="ruta-matriz-demo" required />
           </label>
           <label>
@@ -222,26 +426,24 @@ export function RoutesPage() {
               ))}
             </select>
           </label>
-        </div>
-        <div className="route-form-row route-form-secondary-row">
-          <label className="stack-field route-notes-field">
+          <label className="full-width-form-field">
             Notas
-            <textarea value={form.notes} onChange={(e) => updateField("notes", e.target.value)} rows={2} />
+            <textarea value={form.notes} onChange={(e) => updateField("notes", e.target.value)} rows={3} />
           </label>
           <label>
             Activa
             <div className="checkbox-field">
               <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
-              <span>{form.is_active ? "Sí" : "No"}</span>
+              <span>{form.is_active ? "Si" : "No"}</span>
             </div>
           </label>
           <div className="route-actions">
-            <button type="submit" className="ghost-button">{selectedRoute ? "Actualizar ruta" : "Crear ruta"}</button>
+            <button type="submit" className="ghost-button" disabled={!canManageRoutes}>{selectedRoute ? "Actualizar ruta" : "Crear ruta"}</button>
             <button type="button" className="ghost-button" onClick={() => { setSelectedRouteId(""); setForm(emptyForm()); }}>
               Limpiar
             </button>
             {selectedRoute ? (
-              <button type="button" className="ghost-button" onClick={removeRoute}>
+              <button type="button" className="ghost-button" onClick={removeRoute} disabled={!canManageRoutes}>
                 Eliminar
               </button>
             ) : null}
@@ -249,51 +451,35 @@ export function RoutesPage() {
         </div>
       </form>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th><SortableHeader label="Código" active={sortKey === "code"} direction={sortDirection} onClick={() => toggleSort("code")} /></th>
-            <th><SortableHeader label="Nombre" active={sortKey === "name"} direction={sortDirection} onClick={() => toggleSort("name")} /></th>
-            <th><SortableHeader label="Origen" active={sortKey === "origin"} direction={sortDirection} onClick={() => toggleSort("origin")} /></th>
-            <th><SortableHeader label="Destino" active={sortKey === "destination"} direction={sortDirection} onClick={() => toggleSort("destination")} /></th>
-            <th>Coordenadas</th>
-            <th><SortableHeader label="Activa" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
-          </tr>
-        </thead>
-        <tbody>
-          {paginatedItems.items.map((route) => {
-            const origin = centerById[route.origin_center];
-            const destination = centerById[route.destination_center];
-            return (
-              <tr
-                key={route.id}
-                onClick={() => setSelectedRouteId(route.id)}
-                style={{ cursor: "pointer", background: route.id === selectedRouteId ? "rgba(124, 58, 237, 0.12)" : undefined }}
-              >
-                <td>{route.code}</td>
-                <td>{route.name}</td>
-                <td>{route.origin_center_name ?? origin?.name ?? route.origin_center}</td>
-                <td>{route.destination_center_name ?? destination?.name ?? route.destination_center}</td>
-                <td>
-                  {origin?.latitude && origin?.longitude && destination?.latitude && destination?.longitude
-                    ? `${origin.latitude}, ${origin.longitude} → ${destination.latitude}, ${destination.longitude}`
-                    : `${route.origin_center_latitude ?? "-"}, ${route.origin_center_longitude ?? "-"} → ${route.destination_center_latitude ?? "-"}, ${route.destination_center_longitude ?? "-"}`}
-                </td>
-                <td>{route.is_active ? "Sí" : "No"}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
 
-      <Pagination {...paginatedItems} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
-
-      <section className="metric-panel" style={{ marginTop: 20 }}>
-        <span>Ruta activa</span>
-        <strong>{selectedRoute ? routeSummary(selectedRoute) : "Selecciona una ruta"}</strong>
-        <div className="muted">Origen: {selectedRoute ? centerSummary(centerById[selectedRoute.origin_center]) : "-"}</div>
-        <div className="muted">Destino: {selectedRoute ? centerSummary(centerById[selectedRoute.destination_center]) : "-"}</div>
-        <div className="muted">Notas: {selectedRoute?.notes || "-"}</div>
+      <section className="section-panel" style={{ marginTop: 20 }}>
+        <div className="section-panel-header">
+          <h3>Ficha operativa de ruta</h3>
+          <span className="muted">Datos clave para planeacion, despacho y seguimiento</span>
+        </div>
+        <div className="section-panel-body">
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+            <div className="metric-panel">
+              <span>Ruta activa</span>
+              <strong>{selectedRoute ? routeSummary(selectedRoute) : "Selecciona una ruta"}</strong>
+            </div>
+            <div className="metric-panel">
+              <span>Origen</span>
+              <strong>{selectedRoute ? centerSummary(selectedOriginCenter) : "-"}</strong>
+            </div>
+            <div className="metric-panel">
+              <span>Destino</span>
+              <strong>{selectedRoute ? centerSummary(selectedDestinationCenter) : "-"}</strong>
+            </div>
+            <div className="metric-panel">
+              <span>Estado</span>
+              <strong>{selectedRoute?.is_active ? "Activa" : selectedRoute ? "Inactiva" : "-"}</strong>
+            </div>
+          </div>
+          <div className="muted" style={{ marginTop: 12 }}>
+            {selectedRoute?.notes || "Selecciona una ruta para ver notas, coordenadas y documento de salida."}
+          </div>
+        </div>
       </section>
     </Page>
   );

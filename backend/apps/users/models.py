@@ -9,6 +9,7 @@ from apps.core.models import UUIDTimeStampedModel
 class User(AbstractUser, UUIDTimeStampedModel):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=32, blank=True)
+    roles = models.ManyToManyField("Role", blank=True, related_name="users")
 
     def __str__(self) -> str:
         return self.get_username() or self.email
@@ -22,4 +23,3 @@ class Role(UUIDTimeStampedModel):
 
     def __str__(self) -> str:
         return self.name
-

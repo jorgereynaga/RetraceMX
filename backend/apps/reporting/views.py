@@ -4,6 +4,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,6 +26,11 @@ class BasicReportView(APIView):
         trips = CollectionTrip.objects.all()
         incidents = CollectionTripIncident.objects.all()
         telemetry_points = CollectionTripTelemetryPoint.objects.all()
+        inventory_balance = InventoryMovement.objects.aggregate(
+            inbound_kg=Coalesce(Sum("quantity_kg", filter=Q(movement_type=InventoryMovement.MovementType.INBOUND)), Decimal("0")),
+            outbound_kg=Coalesce(Sum("quantity_kg", filter=Q(movement_type=InventoryMovement.MovementType.OUTBOUND)), Decimal("0")),
+            adjustment_kg=Coalesce(Sum("quantity_kg", filter=Q(movement_type=InventoryMovement.MovementType.ADJUSTMENT)), Decimal("0")),
+        )
 
         total_weight_kg = sum((item.net_weight_kg for item in confirmed_items), Decimal("0"))
         total_merma_kg = sum((item.merma_kg for item in confirmed_items), Decimal("0"))
@@ -31,6 +38,9 @@ class BasicReportView(APIView):
         sale_revenue = sum((item.amount for item in sale_items), Decimal("0"))
         sale_cost = sum((item.estimated_cost for item in sale_items), Decimal("0"))
         sale_profit = sum((item.profit for item in sale_items), Decimal("0"))
+        inventory_current_kg = (
+            Decimal(inventory_balance["inbound_kg"]) + Decimal(inventory_balance["adjustment_kg"]) - Decimal(inventory_balance["outbound_kg"])
+        )
 
         response_payload = {
             "operations_count": operations.count(),
@@ -39,11 +49,19 @@ class BasicReportView(APIView):
             "recovered_tons": float(total_weight_kg / Decimal("1000")),
             "merma_kg": float(total_merma_kg),
             "total_revenue": float(total_revenue),
+            "volume_received_kg": float(total_weight_kg),
+            "volume_sold_kg": float(sum((item.quantity_kg for item in sale_items), Decimal("0"))),
+            "inventory_current_kg": float(inventory_current_kg),
             "sale_orders_count": sales.count(),
             "sale_items_count": sale_items.count(),
             "sale_revenue": float(sale_revenue),
             "sale_cost": float(sale_cost),
             "sale_profit": float(sale_profit),
+            "purchases_vs_sales": {
+                "purchase_amount": float(total_revenue),
+                "sale_amount": float(sale_revenue),
+                "balance_amount": float(sale_revenue - total_revenue),
+            },
             "utility_estimate": float(sale_profit) if sale_items.exists() else None,
             "utility_note": "La utilidad se estima a partir de ventas registradas y costo promedio de inventario.",
             "inventory_movements_count": movements.count(),
@@ -82,22 +100,53 @@ class DailyReportView(APIView):
         )
         end_dt = start_dt + timedelta(days=1)
 
-        day_ops = PurchaseOperation.objects.filter(
-            created_at__gte=start_dt, created_at__lt=end_dt
+        confirmed_day_ops = PurchaseOperation.objects.filter(
+            confirmed_at__gte=start_dt,
+            confirmed_at__lt=end_dt,
+            status__in=[PurchaseOperation.Status.CONFIRMED, PurchaseOperation.Status.COMPLETED],
         ).select_related("customer")
 
         day_items = list(
             TicketItem.objects.filter(
-                operation__created_at__gte=start_dt,
-                operation__created_at__lt=end_dt,
+                operation__confirmed_at__gte=start_dt,
+                operation__confirmed_at__lt=end_dt,
                 status=TicketItem.Status.CONFIRMED,
             ).select_related("material__family", "operation")
         )
+        day_sales = list(
+            SaleItem.objects.filter(
+                sale_order__sold_at__gte=start_dt,
+                sale_order__sold_at__lt=end_dt,
+                sale_order__status__in=[
+                    SaleOrder.Status.CONFIRMED,
+                    SaleOrder.Status.SENT_TO_CASHIER,
+                    SaleOrder.Status.SCHEDULED_DELIVERY,
+                    SaleOrder.Status.LOADING,
+                    SaleOrder.Status.IN_ROUTE,
+                    SaleOrder.Status.DELIVERED,
+                    SaleOrder.Status.COMPLETED,
+                    SaleOrder.Status.PAID,
+                    SaleOrder.Status.CREDIT,
+                    SaleOrder.Status.CLOSED,
+                    SaleOrder.Status.ADJUSTED,
+                ],
+            ).select_related("sale_order", "material")
+        )
+        inventory_balance = InventoryMovement.objects.aggregate(
+            inbound_kg=Coalesce(Sum("quantity_kg", filter=Q(movement_type=InventoryMovement.MovementType.INBOUND)), Decimal("0")),
+            outbound_kg=Coalesce(Sum("quantity_kg", filter=Q(movement_type=InventoryMovement.MovementType.OUTBOUND)), Decimal("0")),
+            adjustment_kg=Coalesce(Sum("quantity_kg", filter=Q(movement_type=InventoryMovement.MovementType.ADJUSTMENT)), Decimal("0")),
+        )
+        inventory_current_kg = (
+            Decimal(inventory_balance["inbound_kg"]) + Decimal(inventory_balance["adjustment_kg"]) - Decimal(inventory_balance["outbound_kg"])
+        )
 
-        ops_count = day_ops.count()
+        ops_count = confirmed_day_ops.count()
         total_weight = sum((item.net_weight_kg for item in day_items), Decimal("0"))
         total_merma = sum((item.merma_kg for item in day_items), Decimal("0"))
         total_revenue = sum((item.amount for item in day_items), Decimal("0"))
+        sale_weight = sum((item.quantity_kg for item in day_sales), Decimal("0"))
+        sale_revenue = sum((item.amount for item in day_sales), Decimal("0"))
 
         by_family: dict[str, dict] = defaultdict(
             lambda: {"name": "", "weight_kg": Decimal("0"), "amount": Decimal("0"), "items_count": 0}
@@ -131,7 +180,7 @@ class DailyReportView(APIView):
         by_client: dict[str, dict] = defaultdict(
             lambda: {"name": "", "ops_count": 0, "weight_kg": Decimal("0"), "amount": Decimal("0")}
         )
-        for op in day_ops:
+        for op in confirmed_day_ops:
             cid = str(op.customer_id) if op.customer_id else "no-client"
             by_client[cid]["name"] = (
                 op.customer.trade_name or op.customer.legal_name if op.customer else "Sin cliente"
@@ -170,16 +219,58 @@ class DailyReportView(APIView):
                     status=TicketItem.Status.CONFIRMED,
                 )
             )
-            d_revenue = sum((item.amount for item in d_items), Decimal("0"))
-            d_weight = sum((item.net_weight_kg for item in d_items), Decimal("0"))
+            d_sales = list(
+                SaleItem.objects.filter(
+                    sale_order__sold_at__gte=d_start,
+                    sale_order__sold_at__lt=d_end,
+                    sale_order__status__in=[
+                        SaleOrder.Status.CONFIRMED,
+                        SaleOrder.Status.SENT_TO_CASHIER,
+                        SaleOrder.Status.SCHEDULED_DELIVERY,
+                        SaleOrder.Status.LOADING,
+                        SaleOrder.Status.IN_ROUTE,
+                        SaleOrder.Status.DELIVERED,
+                        SaleOrder.Status.COMPLETED,
+                        SaleOrder.Status.PAID,
+                        SaleOrder.Status.CREDIT,
+                        SaleOrder.Status.CLOSED,
+                        SaleOrder.Status.ADJUSTED,
+                    ],
+                )
+            )
+            d_purchase_revenue = sum((item.amount for item in d_items), Decimal("0"))
+            d_purchase_weight = sum((item.net_weight_kg for item in d_items), Decimal("0"))
+            d_sale_revenue = sum((item.amount for item in d_sales), Decimal("0"))
+            d_sale_weight = sum((item.quantity_kg for item in d_sales), Decimal("0"))
             trend.append(
                 {
                     "date": d.isoformat(),
                     "label": d.strftime("%d/%m"),
-                    "revenue": float(d_revenue),
-                    "weight_kg": float(d_weight),
-                    "ops_count": PurchaseOperation.objects.filter(
-                        created_at__gte=d_start, created_at__lt=d_end
+                    "purchase_revenue": float(d_purchase_revenue),
+                    "purchase_weight_kg": float(d_purchase_weight),
+                    "sale_revenue": float(d_sale_revenue),
+                    "sale_weight_kg": float(d_sale_weight),
+                    "purchase_ops_count": PurchaseOperation.objects.filter(
+                        confirmed_at__gte=d_start,
+                        confirmed_at__lt=d_end,
+                        status__in=[PurchaseOperation.Status.CONFIRMED, PurchaseOperation.Status.COMPLETED],
+                    ).count(),
+                    "sale_orders_count": SaleOrder.objects.filter(
+                        sold_at__gte=d_start,
+                        sold_at__lt=d_end,
+                        status__in=[
+                            SaleOrder.Status.CONFIRMED,
+                            SaleOrder.Status.SENT_TO_CASHIER,
+                            SaleOrder.Status.SCHEDULED_DELIVERY,
+                            SaleOrder.Status.LOADING,
+                            SaleOrder.Status.IN_ROUTE,
+                            SaleOrder.Status.DELIVERED,
+                            SaleOrder.Status.COMPLETED,
+                            SaleOrder.Status.PAID,
+                            SaleOrder.Status.CREDIT,
+                            SaleOrder.Status.CLOSED,
+                            SaleOrder.Status.ADJUSTED,
+                        ],
                     ).count(),
                 }
             )
@@ -191,6 +282,15 @@ class DailyReportView(APIView):
                 "total_weight_kg": float(total_weight),
                 "total_merma_kg": float(total_merma),
                 "total_revenue": float(total_revenue),
+                "volume_received_kg": float(total_weight),
+                "volume_sold_kg": float(sale_weight),
+                "sale_revenue": float(sale_revenue),
+                "inventory_current_kg": float(inventory_current_kg),
+                "purchases_vs_sales": {
+                    "purchase_amount": float(total_revenue),
+                    "sale_amount": float(sale_revenue),
+                    "balance_amount": float(sale_revenue - total_revenue),
+                },
                 "by_family": family_breakdown,
                 "by_client": client_breakdown,
                 "trend_7d": trend,

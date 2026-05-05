@@ -6,6 +6,8 @@ import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
 import { matchesSearch, paginate } from "../utils/listing";
 import { sortByValue } from "../utils/listing";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 function kindLabel(kind: CollectionCenter["kind"]) {
   if (kind === "smelter") return "Fundidora";
@@ -26,6 +28,8 @@ function emptyForm() {
 }
 
 export function CentersPage() {
+  const { user } = useAuth();
+  const canManageCenters = userCan(user, "centers.manage");
   const [items, setItems] = useState<CollectionCenter[]>([]);
   const [selectedCenterId, setSelectedCenterId] = useState("");
   const [form, setForm] = useState(emptyForm());
@@ -107,6 +111,10 @@ export function CentersPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!canManageCenters) {
+      setMessage("No tienes permiso para gestionar centros.");
+      return;
+    }
     setMessage(null);
     try {
       const payload = {
@@ -135,6 +143,13 @@ export function CentersPage() {
 
   async function removeCenter() {
     if (!selectedCenter) return;
+    if (!canManageCenters) {
+      setMessage("No tienes permiso para eliminar centros.");
+      return;
+    }
+    if (!window.confirm(`Seguro que deseas eliminar el centro ${selectedCenter.code} · ${selectedCenter.name}? Esta accion no se puede deshacer.`)) {
+      return;
+    }
     setMessage(null);
     try {
       await api.centerDelete(selectedCenter.id);
@@ -209,12 +224,12 @@ export function CentersPage() {
             <span>{form.is_active ? "Sí" : "No"}</span>
           </div>
         </label>
-        <button type="submit">{selectedCenter ? "Actualizar" : "Crear"} centro</button>
+        <button type="submit" disabled={!canManageCenters}>{selectedCenter ? "Actualizar" : "Crear"} centro</button>
         <button type="button" className="ghost-button" onClick={() => { setSelectedCenterId(""); setForm(emptyForm()); }}>
           Limpiar
         </button>
         {selectedCenter ? (
-          <button type="button" onClick={removeCenter} className="ghost-button">
+          <button type="button" onClick={removeCenter} className="ghost-button" disabled={!canManageCenters}>
             Eliminar
           </button>
         ) : null}
