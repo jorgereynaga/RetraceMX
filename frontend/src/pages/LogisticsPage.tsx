@@ -583,8 +583,8 @@ export function LogisticsPage() {
                     <tr key={delivery.id}>
                       <td style={{ fontFamily: "monospace", fontWeight: 700 }}>{delivery.folio}</td>
                       <td>{delivery.sale_folio ?? delivery.sale_order}</td>
-                      <td>{delivery.route_name ?? delivery.route}</td>
-                      <td>{delivery.vehicle_label ?? delivery.vehicle}</td>
+                      <td>{delivery.route_name ?? "-"}</td>
+                      <td>{delivery.vehicle_label ?? "-"}</td>
                       <td>{formatDateTime(delivery.scheduled_date ?? delivery.created_at)}</td>
                     </tr>
                   ))}
