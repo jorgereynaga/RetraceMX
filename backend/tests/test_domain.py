@@ -101,12 +101,9 @@ def test_total_ticket_and_status_transition():
     assert operation.total_merma_kg == Decimal("1")
     assert operation.total_amount == Decimal("130.00")
 
-    change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user, reason="validated")
-    operation.refresh_from_db()
-    assert operation.status == PurchaseOperation.Status.CONFIRMED
-
     register_payment(operation=operation, amount=Decimal("130.00"), method="cash", received_by=user)
     operation.refresh_from_db()
+    assert operation.status == PurchaseOperation.Status.CONFIRMED
     assert operation.payment_status == PurchaseOperation.PaymentStatus.PAID
 
     change_operation_status(operation, PurchaseOperation.Status.COMPLETED, user=user, reason="closed")
@@ -129,6 +126,7 @@ def test_inventory_generation_and_audit_log():
         merma_kg=Decimal("0"),
         user=user,
     )
+    register_payment(operation=operation, amount=Decimal("28.00"), method="cash", received_by=user)
     assert InventoryMovement.objects.filter(ticket_item=item).exists()
     assert AuditLog.objects.filter(action="create_inventory_movement").exists()
 
@@ -169,6 +167,7 @@ def test_ticket_item_adjustment_after_print_updates_audit_and_inventory():
         merma_kg=Decimal("0"),
         user=user,
     )
+    register_payment(operation=operation, amount=Decimal("70.00"), method="cash", received_by=user)
     operation.print_status = PurchaseOperation.PrintStatus.PRINTED
     operation.save(update_fields=["print_status", "updated_at"])
     updated = update_ticket_item(
@@ -255,6 +254,50 @@ def test_payment_overflow_and_completion_requires_paid_status():
         change_operation_status(other_operation, PurchaseOperation.Status.COMPLETED, user=second_user, reason="not paid yet")
 
 
+def test_printing_does_not_block_cancellation_when_no_payment_exists():
+    user, center, customer, material, operation = build_context()
+    register_ticket_item(
+        operation=operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("10.00"),
+        gross_weight_kg=Decimal("10"),
+        merma_kg=Decimal("0"),
+        user=user,
+    )
+    register_print_event(operation=operation, printed_by=user, printer_name="SimPrinter", copies=1, is_reprint=False)
+
+    operation.refresh_from_db()
+    cancelled = change_operation_status(operation, PurchaseOperation.Status.CANCELLED, user=user, reason="cancel after print")
+    assert cancelled.status == PurchaseOperation.Status.CANCELLED
+    assert cancelled.cancelled_at is not None
+
+
+def test_reprint_log_is_audited():
+    user, center, customer, material, operation = build_context()
+    register_ticket_item(
+        operation=operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("10.00"),
+        gross_weight_kg=Decimal("10"),
+        merma_kg=Decimal("0"),
+        user=user,
+    )
+    log = register_print_event(operation=operation, printed_by=user, printer_name="Epson TM-T20", copies=1)
+    reprint = register_print_event(
+        operation=operation,
+        printed_by=user,
+        printer_name=log.printer_name,
+        copies=log.copies,
+        is_reprint=True,
+        payload=log.payload,
+        notes="Reimpresion de prueba",
+    )
+    assert reprint.is_reprint is True
+    assert AuditLog.objects.filter(action="register_print_event", entity_id=str(reprint.pk)).exists()
+
+
 def test_sale_order_closes_and_reduces_stock():
     user, center, customer, material, operation = build_context()
     register_ticket_item(
@@ -266,6 +309,7 @@ def test_sale_order_closes_and_reduces_stock():
         merma_kg=Decimal("0"),
         user=user,
     )
+    register_payment(operation=operation, amount=Decimal("200.00"), method="cash", received_by=user)
 
     sale_order = register_sale_order(collection_center=center, buyer=customer, created_by=user, notes="Venta demo")
     sale_item = add_sale_item(
@@ -339,7 +383,16 @@ def test_confirming_operation_closes_open_weighing_sessions():
     assert session.status == WeighingSession.Status.OPEN
     assert session.ended_at is None
 
-    change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user)
+    register_ticket_item(
+        operation=operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("7.00"),
+        gross_weight_kg=Decimal("10"),
+        merma_kg=Decimal("0"),
+        user=user,
+    )
+    register_payment(operation=operation, amount=Decimal("70.00"), method="cash", received_by=user)
 
     session.refresh_from_db()
     assert session.status == WeighingSession.Status.CLOSED
@@ -395,7 +448,16 @@ def test_already_closed_sessions_are_not_double_updated():
     original_ended_at = timezone.now()
     WeighingSession.objects.filter(pk=session.pk).update(status=WeighingSession.Status.CLOSED, ended_at=original_ended_at)
 
-    change_operation_status(operation, PurchaseOperation.Status.CONFIRMED, user=user)
+    register_ticket_item(
+        operation=operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("7.00"),
+        gross_weight_kg=Decimal("10"),
+        merma_kg=Decimal("0"),
+        user=user,
+    )
+    register_payment(operation=operation, amount=Decimal("70.00"), method="cash", received_by=user)
 
     session.refresh_from_db()
     assert session.status == WeighingSession.Status.CLOSED

@@ -15,8 +15,13 @@ import type {
   EvidenceFile,
   MaterialFamily,
   Material,
+  MaterialProcess,
+  MaterialProcessInput,
+  MaterialProcessOutput,
+  MaterialProcessWaste,
   InventoryMovement,
   InventorySummary,
+  LotTraceReport,
   Party,
   Payment,
   PrintLog,
@@ -24,6 +29,7 @@ import type {
   PriceList,
   PriceListItem,
   PriceSuggestion,
+  ProcessType,
   Route,
   SaleItem,
   SaleOrder,
@@ -52,6 +58,21 @@ export const api = {
   centerDelete: (id: string) => apiDelete<void>(`/collection-centers/${id}/`),
   commercialRoles: () => apiList<CommercialRole>("/commercial-roles/"),
   materialFamilies: () => apiList<MaterialFamily>("/material-families/"),
+  processTypes: () => apiListAll<ProcessType>("/process-types/"),
+  processTypeCreate: (payload: Record<string, unknown>) => apiPost<ProcessType>("/process-types/", payload),
+  processTypeUpdate: (id: string, payload: Record<string, unknown>) => apiPut<ProcessType>(`/process-types/${id}/`, payload),
+  processTypePatch: (id: string, payload: Record<string, unknown>) => apiPatch<ProcessType>(`/process-types/${id}/`, payload),
+  processTypeDelete: (id: string) => apiDelete<void>(`/process-types/${id}/`),
+  materialProcesses: () => apiListAll<MaterialProcess>("/material-processes/"),
+  materialProcessCreate: (payload: Record<string, unknown>) => apiPost<MaterialProcess>("/material-processes/", payload),
+  materialProcessConfirm: (id: string) => apiPost<MaterialProcess>(`/material-processes/${id}/confirm/`, {}),
+  materialProcessCancel: (id: string, reason = "") => apiPost<MaterialProcess>(`/material-processes/${id}/cancel/`, { reason }),
+  materialProcessInputs: () => apiListAll<MaterialProcessInput>("/material-process-inputs/"),
+  materialProcessInputCreate: (payload: Record<string, unknown>) => apiPost<MaterialProcessInput>("/material-process-inputs/", payload),
+  materialProcessOutputs: () => apiListAll<MaterialProcessOutput>("/material-process-outputs/"),
+  materialProcessOutputCreate: (payload: Record<string, unknown>) => apiPost<MaterialProcessOutput>("/material-process-outputs/", payload),
+  materialProcessWastes: () => apiListAll<MaterialProcessWaste>("/material-process-wastes/"),
+  materialProcessWasteCreate: (payload: Record<string, unknown>) => apiPost<MaterialProcessWaste>("/material-process-wastes/", payload),
   materialCreate: (payload: Record<string, unknown>) => apiPost<Material>("/materials/", payload),
   materialUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Material>(`/materials/${id}/`, payload),
   materialPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Material>(`/materials/${id}/`, payload),
@@ -198,6 +219,18 @@ export const api = {
       volume_sold_kg: number;
       sale_revenue: number;
       inventory_current_kg: number;
+      raw_inventory_current_kg: number;
+      processed_inventory_current_kg: number;
+      processes_count: number;
+      process_input_kg: number;
+      process_output_kg: number;
+      process_waste_kg: number;
+      process_yield_pct: number;
+      sale_processed_kg: number;
+      sale_raw_kg: number;
+      sale_processed_amount: number;
+      sale_raw_amount: number;
+      purchase_vs_sales_kg_balance: number;
       purchases_vs_sales: {
         purchase_amount: number;
         sale_amount: number;
@@ -216,4 +249,5 @@ export const api = {
         sale_orders_count: number;
       }>;
     }>(date ? `/reports/daily/?date=${date}` : "/reports/daily/"),
+  reportLotTrace: (lotCode: string) => apiGet<LotTraceReport>(`/reports/lot-trace/?lot_code=${encodeURIComponent(lotCode)}`),
 };

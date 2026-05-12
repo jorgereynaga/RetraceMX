@@ -294,16 +294,16 @@ export function RoutesPage() {
   }
 
   return (
-    <Page title="Rutas" actions={<span className="muted">Planeacion de origenes y destinos</span>}>
+    <Page title="Rutas" actions={<span className="muted">Planeación de orígenes, destinos y fichas operativas</span>}>
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 16 }}>
+      <section className="metric-grid" style={{ marginBottom: 16, gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
         <div className="metric-panel">
           <span>Rutas activas</span>
           <strong>{items.filter((route) => route.is_active).length}</strong>
         </div>
         <div className="metric-panel">
-          <span>Origenes</span>
+          <span>Orígenes</span>
           <strong>{new Set(items.map((route) => route.origin_center)).size}</strong>
         </div>
         <div className="metric-panel">
@@ -314,11 +314,11 @@ export function RoutesPage() {
           <span>Total rutas</span>
           <strong>{items.length}</strong>
         </div>
-      </div>
+      </section>
 
-      <div className="metric-panel" style={{ marginBottom: 12 }}>
+      <div className="metric-panel" style={{ marginBottom: 16 }}>
         <label className="search-box">
-          Busqueda rapida
+          Búsqueda rápida
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -327,135 +327,163 @@ export function RoutesPage() {
         </label>
       </div>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th><SortableHeader label="Codigo" active={sortKey === "code"} direction={sortDirection} onClick={() => toggleSort("code")} /></th>
-            <th><SortableHeader label="Nombre" active={sortKey === "name"} direction={sortDirection} onClick={() => toggleSort("name")} /></th>
-            <th><SortableHeader label="Origen" active={sortKey === "origin"} direction={sortDirection} onClick={() => toggleSort("origin")} /></th>
-            <th><SortableHeader label="Destino" active={sortKey === "destination"} direction={sortDirection} onClick={() => toggleSort("destination")} /></th>
-            <th>Coordenadas</th>
-            <th><SortableHeader label="Activa" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
-          </tr>
-        </thead>
-        <tbody>
-          {paginatedItems.items.map((route) => {
-            const origin = centerById[route.origin_center];
-            const destination = centerById[route.destination_center];
-            return (
-              <tr
-                key={route.id}
-                onClick={() => setSelectedRouteId(route.id)}
-                style={{ cursor: "pointer", background: route.id === selectedRouteId ? "rgba(124, 58, 237, 0.12)" : undefined }}
-              >
-                <td>{route.code}</td>
-                <td>{route.name}</td>
-                <td>{route.origin_center_name ?? origin?.name ?? route.origin_center}</td>
-                <td>{route.destination_center_name ?? destination?.name ?? route.destination_center}</td>
-                <td>
-                  {origin?.latitude && origin?.longitude && destination?.latitude && destination?.longitude
-                    ? `${origin.latitude}, ${origin.longitude} -> ${destination.latitude}, ${destination.longitude}`
-                    : `${route.origin_center_latitude ?? "-"}, ${route.origin_center_longitude ?? "-"} -> ${route.destination_center_latitude ?? "-"}, ${route.destination_center_longitude ?? "-"}`}
-                </td>
-                <td>{route.is_active ? "Si" : "No"}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <Pagination {...paginatedItems} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
-
-
       <section className="section-panel" style={{ marginBottom: 16 }}>
         <div className="section-panel-header">
-          <h3>Planeacion de rutas</h3>
-          <span className="muted">Define origen, destino y notas operativas en una sola vista</span>
+          <h3>Listado de rutas</h3>
+          <span className="muted">Selecciona una ruta para ver ficha, mapa y acciones</span>
         </div>
         <div className="section-panel-body">
-          <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.15fr)", gap: 16 }}>
-            <div className="metric-panel" style={{ display: "grid", gap: 8 }}>
-              <span>Ruta seleccionada</span>
-              <strong>{selectedRoute ? routeSummary(selectedRoute) : "Selecciona una ruta"}</strong>
-              <div className="muted">Origen: {selectedRoute ? centerSummary(selectedOriginCenter) : "-"}</div>
-              <div className="muted">Destino: {selectedRoute ? centerSummary(selectedDestinationCenter) : "-"}</div>
-              <div className="muted">Notas: {selectedRoute?.notes || "-"}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-                <button type="button" onClick={printRouteSheet} disabled={!canManageRoutes || !selectedRoute}>
-                  Imprimir ficha
-                </button>
-                <button type="button" onClick={() => selectedRoute && setMessage(`Ruta ${selectedRoute.code} lista para documento.`)} disabled={!canManageRoutes || !selectedRoute}>
-                  Preparar documento
-                </button>
-              </div>
-            </div>
-            <RouteMap points={routeMapPoints} title="Mapa de ruta" />
+          <div style={{ overflowX: "auto", marginBottom: 14 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th><SortableHeader label="Código" active={sortKey === "code"} direction={sortDirection} onClick={() => toggleSort("code")} /></th>
+                  <th><SortableHeader label="Nombre" active={sortKey === "name"} direction={sortDirection} onClick={() => toggleSort("name")} /></th>
+                  <th><SortableHeader label="Origen" active={sortKey === "origin"} direction={sortDirection} onClick={() => toggleSort("origin")} /></th>
+                  <th><SortableHeader label="Destino" active={sortKey === "destination"} direction={sortDirection} onClick={() => toggleSort("destination")} /></th>
+                  <th>Coordenadas</th>
+                  <th><SortableHeader label="Activa" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedItems.items.map((route) => {
+                  const origin = centerById[route.origin_center];
+                  const destination = centerById[route.destination_center];
+                  return (
+                    <tr
+                      key={route.id}
+                      onClick={() => setSelectedRouteId(route.id)}
+                      style={{ cursor: "pointer", background: route.id === selectedRouteId ? "rgba(124, 58, 237, 0.12)" : undefined }}
+                    >
+                      <td style={{ fontWeight: 700 }}>{route.code}</td>
+                      <td>{route.name}</td>
+                      <td>{route.origin_center_name ?? origin?.name ?? route.origin_center}</td>
+                      <td>{route.destination_center_name ?? destination?.name ?? route.destination_center}</td>
+                      <td>
+                        {origin?.latitude && origin?.longitude && destination?.latitude && destination?.longitude
+                          ? `${origin.latitude}, ${origin.longitude} -> ${destination.latitude}, ${destination.longitude}`
+                          : `${route.origin_center_latitude ?? "-"}, ${route.origin_center_longitude ?? "-"} -> ${route.destination_center_latitude ?? "-"}, ${route.destination_center_longitude ?? "-"}`}
+                      </td>
+                      <td>
+                        <span className={`badge ${route.is_active ? "badge-green" : "badge-gray"}`}>{route.is_active ? "Activa" : "Inactiva"}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
+          <Pagination {...paginatedItems} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
         </div>
       </section>
 
-      <form className="section-panel" onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
-        <div className="section-panel-body grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          <label>
-            Codigo
-            <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="ruta-matriz-demo" required />
-          </label>
-          <label>
-            Nombre
-            <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Ruta Matriz Demo" required />
-          </label>
-          <label className="route-center-field">
-            Origen
-            <select value={form.origin_center} onChange={(e) => updateField("origin_center", e.target.value)} required>
-              <option value="">Seleccionar</option>
-              {centers.map((center) => (
-                <option key={center.id} value={center.id}>
-                  {centerSummary(center)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="route-center-field">
-            Destino
-            <select value={form.destination_center} onChange={(e) => updateField("destination_center", e.target.value)} required>
-              <option value="">Seleccionar</option>
-              {centers.map((center) => (
-                <option key={center.id} value={center.id}>
-                  {centerSummary(center)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="full-width-form-field">
-            Notas
-            <textarea value={form.notes} onChange={(e) => updateField("notes", e.target.value)} rows={3} />
-          </label>
-          <label>
-            Activa
-            <div className="checkbox-field">
-              <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
-              <span>{form.is_active ? "Si" : "No"}</span>
-            </div>
-          </label>
-          <div className="route-actions">
-            <button type="submit" className="ghost-button" disabled={!canManageRoutes}>{selectedRoute ? "Actualizar ruta" : "Crear ruta"}</button>
-            <button type="button" className="ghost-button" onClick={() => { setSelectedRouteId(""); setForm(emptyForm()); }}>
-              Limpiar
-            </button>
-            {selectedRoute ? (
-              <button type="button" className="ghost-button" onClick={removeRoute} disabled={!canManageRoutes}>
-                Eliminar
-              </button>
-            ) : null}
+      <div className="processing-two-up" style={{ marginBottom: 16 }}>
+        <section className="section-panel">
+          <div className="section-panel-header">
+            <h3>Ficha operativa</h3>
+            <span className="muted">Resumen, mapa y acciones</span>
           </div>
-        </div>
-      </form>
+          <div className="section-panel-body" style={{ display: "grid", gap: 14 }}>
+            <div className="metric-grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+              <div className="metric-panel">
+                <span>Ruta seleccionada</span>
+                <strong>{selectedRoute ? selectedRoute.code : "-"}</strong>
+              </div>
+              <div className="metric-panel">
+                <span>Origen</span>
+                <strong>{selectedRoute ? centerSummary(selectedOriginCenter) : "-"}</strong>
+              </div>
+              <div className="metric-panel">
+                <span>Destino</span>
+                <strong>{selectedRoute ? centerSummary(selectedDestinationCenter) : "-"}</strong>
+              </div>
+              <div className="metric-panel">
+                <span>Estado</span>
+                <strong>{selectedRoute ? (selectedRoute.is_active ? "Activa" : "Inactiva") : "-"}</strong>
+              </div>
+            </div>
+            <div className="info-banner" style={{ display: "grid", gap: 6 }}>
+              <strong>Notas</strong>
+              <span>{selectedRoute?.notes || "Selecciona una ruta para ver notas y trazabilidad."}</span>
+            </div>
+            <div className="inline-form" style={{ gridTemplateColumns: "auto auto", justifyContent: "start" }}>
+              <button type="button" onClick={printRouteSheet} disabled={!canManageRoutes || !selectedRoute}>
+                Imprimir ficha
+              </button>
+              <button type="button" className="ghost-button" onClick={() => selectedRoute && setMessage(`Ruta ${selectedRoute.code} lista para documento.`)} disabled={!canManageRoutes || !selectedRoute}>
+                Preparar documento
+              </button>
+            </div>
+            <RouteMap points={routeMapPoints} title="Mapa de ruta" />
+          </div>
+        </section>
 
+        <form className="section-panel" onSubmit={handleSubmit}>
+          <div className="section-panel-header">
+            <h3>{selectedRoute ? "Editar ruta" : "Nueva ruta"}</h3>
+            <span className="muted">Define origen, destino y notas operativas</span>
+          </div>
+          <div className="section-panel-body grid-form">
+            <label>
+              Código
+              <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="ruta-matriz-demo" required />
+            </label>
+            <label>
+              Nombre
+              <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Ruta Matriz Demo" required />
+            </label>
+            <label className="route-center-field">
+              Origen
+              <select value={form.origin_center} onChange={(e) => updateField("origin_center", e.target.value)} required>
+                <option value="">Seleccionar</option>
+                {centers.map((center) => (
+                  <option key={center.id} value={center.id}>
+                    {centerSummary(center)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="route-center-field">
+              Destino
+              <select value={form.destination_center} onChange={(e) => updateField("destination_center", e.target.value)} required>
+                <option value="">Seleccionar</option>
+                {centers.map((center) => (
+                  <option key={center.id} value={center.id}>
+                    {centerSummary(center)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="full-width-form-field">
+              Notas
+              <textarea value={form.notes} onChange={(e) => updateField("notes", e.target.value)} rows={3} />
+            </label>
+            <label>
+              Activa
+              <div className="checkbox-field">
+                <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
+                <span>{form.is_active ? "Sí" : "No"}</span>
+              </div>
+            </label>
+            <div className="route-actions">
+              <button type="submit" className="ghost-button" disabled={!canManageRoutes}>{selectedRoute ? "Actualizar ruta" : "Crear ruta"}</button>
+              <button type="button" className="ghost-button" onClick={() => { setSelectedRouteId(""); setForm(emptyForm()); }}>
+                Limpiar
+              </button>
+              {selectedRoute ? (
+                <button type="button" className="ghost-button" onClick={removeRoute} disabled={!canManageRoutes}>
+                  Eliminar
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </form>
+      </div>
 
-      <section className="section-panel" style={{ marginTop: 20 }}>
+      <section className="section-panel">
         <div className="section-panel-header">
-          <h3>Ficha operativa de ruta</h3>
-          <span className="muted">Datos clave para planeacion, despacho y seguimiento</span>
+          <h3>Documento operativo</h3>
+          <span className="muted">Vista rápida para planeación, despacho y seguimiento</span>
         </div>
         <div className="section-panel-body">
           <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>

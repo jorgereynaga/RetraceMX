@@ -11,6 +11,7 @@ from apps.users.views import LoginView, UserViewSet, RoleViewSet
 from apps.parties.views import CommercialRoleViewSet, PersonOrCompanyViewSet, VehicleViewSet, DriverViewSet, CollectionCenterViewSet
 from apps.materials.views import MaterialFamilyViewSet, MaterialViewSet, PriceListItemViewSet, PriceListViewSet
 from apps.materials.views import price_suggestion
+from apps.processing.views import MaterialProcessInputViewSet, MaterialProcessOutputViewSet, MaterialProcessViewSet, MaterialProcessWasteViewSet, ProcessTypeViewSet
 from apps.logistics.views import CollectionTripIncidentViewSet, CollectionTripStopViewSet, CollectionTripTelemetryPointViewSet, CollectionTripViewSet, DeliveryEvidenceViewSet, DeliveryIncidentViewSet, DeliveryItemViewSet, DeliveryRouteStopViewSet, DeliveryViewSet, GeoEventViewSet, GPSPositionIngestView, GPSPositionViewSet, RouteViewSet
 from apps.devices.views import DeviceViewSet
 from apps.weighing.views import WeighingSessionViewSet, ScaleReadingViewSet
@@ -20,7 +21,7 @@ from apps.payments.views import PaymentViewSet
 from apps.inventory.views import InventoryMovementViewSet
 from apps.evidence.views import EvidenceFileViewSet, CustodyEventViewSet, PrintLogViewSet
 from apps.auditing.views import AuditLogViewSet
-from apps.reporting.views import BasicReportView, DailyReportView
+from apps.reporting.views import BasicReportView, DailyReportView, LotTraceReportView
 
 router = DefaultRouter()
 router.register("users", UserViewSet)
@@ -34,6 +35,11 @@ router.register("material-families", MaterialFamilyViewSet)
 router.register("materials", MaterialViewSet)
 router.register("price-lists", PriceListViewSet)
 router.register("price-list-items", PriceListItemViewSet)
+router.register("process-types", ProcessTypeViewSet)
+router.register("material-processes", MaterialProcessViewSet)
+router.register("material-process-inputs", MaterialProcessInputViewSet)
+router.register("material-process-outputs", MaterialProcessOutputViewSet)
+router.register("material-process-wastes", MaterialProcessWasteViewSet)
 router.register("routes", RouteViewSet)
 router.register("collection-trips", CollectionTripViewSet)
 router.register("collection-trip-stops", CollectionTripStopViewSet)
@@ -67,6 +73,7 @@ urlpatterns = [
     path("api/auth/login/", LoginView.as_view(), name="auth-login"),
     path("api/reports/basic/", BasicReportView.as_view(), name="basic-report"),
     path("api/reports/daily/", DailyReportView.as_view(), name="daily-report"),
+    path("api/reports/lot-trace/", LotTraceReportView.as_view(), name="lot-trace-report"),
     path("api/sale-stock/", SaleStockView.as_view(), name="sale-stock"),
     path("api/price-suggestion/", price_suggestion, name="price-suggestion"),
     path("api/gps/positions/", GPSPositionIngestView.as_view(), name="gps-positions-ingest"),

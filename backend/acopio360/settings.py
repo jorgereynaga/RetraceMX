@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "apps.users",
     "apps.parties",
     "apps.materials",
+    "apps.processing",
     "apps.logistics",
     "apps.devices",
     "apps.weighing",

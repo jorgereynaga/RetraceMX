@@ -14,7 +14,7 @@ from apps.users.permissions import RolePermission
 
 from .models import InventoryMovement
 from .serializers import InventoryMovementAdjustmentSerializer, InventoryMovementSerializer
-from .services import create_inventory_movement
+from .services import INBOUND_TYPES, OUTBOUND_TYPES, create_inventory_movement
 
 
 class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
@@ -43,6 +43,8 @@ class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
                 "collection_center_name": "",
                 "material_id": "",
                 "material_name": "",
+                "material_is_processed": False,
+                "material_is_sellable": False,
                 "inbound_kg": Decimal("0"),
                 "outbound_kg": Decimal("0"),
                 "adjustment_kg": Decimal("0"),
@@ -58,15 +60,17 @@ class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
             bucket["collection_center_name"] = movement.collection_center.name if movement.collection_center else ""
             bucket["material_id"] = str(movement.material_id)
             bucket["material_name"] = str(movement.material) if movement.material else ""
+            bucket["material_is_processed"] = bool(getattr(movement.material, "is_processed", False))
+            bucket["material_is_sellable"] = bool(getattr(movement.material, "is_sellable", False))
             bucket["movements_count"] += 1
             bucket["last_movement_at"] = movement.occurred_at.isoformat()
             totals["movements_count"] += 1
 
             qty = Decimal(movement.quantity_kg or 0)
-            if movement.movement_type == InventoryMovement.MovementType.INBOUND:
+            if movement.movement_type in INBOUND_TYPES:
                 bucket["inbound_kg"] += qty
                 totals["inbound_count"] += 1
-            elif movement.movement_type == InventoryMovement.MovementType.OUTBOUND:
+            elif movement.movement_type in OUTBOUND_TYPES:
                 bucket["outbound_kg"] += qty
                 totals["outbound_count"] += 1
             else:
@@ -100,11 +104,12 @@ class InventoryMovementViewSet(viewsets.ReadOnlyModelViewSet):
         material = get_object_or_404(Material, pk=serializer.validated_data["material"])
         delta_kg = Decimal(serializer.validated_data["delta_kg"])
         unit_price = Decimal(serializer.validated_data.get("unit_price") or 0)
-        quantity_kg = delta_kg
+        quantity_kg = abs(delta_kg)
         amount = (quantity_kg * unit_price).quantize(Decimal("0.01"))
+        movement_type = InventoryMovement.MovementType.MANUAL_ADJUSTMENT_IN if delta_kg > 0 else InventoryMovement.MovementType.MANUAL_ADJUSTMENT_OUT
         movement = create_inventory_movement(
             user=request.user,
-            movement_type=InventoryMovement.MovementType.ADJUSTMENT,
+            movement_type=movement_type,
             material=material,
             collection_center=collection_center,
             quantity_kg=quantity_kg,

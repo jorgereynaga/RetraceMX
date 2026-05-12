@@ -13,7 +13,7 @@ const PAYMENT_METHODS = [
   { value: "card", label: "Tarjeta", requiresReference: true, allowsChange: false },
   { value: "cheque", label: "Cheque", requiresReference: true, allowsChange: false },
   { value: "voucher", label: "Vale", requiresReference: true, allowsChange: false },
-  { value: "credit", label: "Credito", requiresReference: false, allowsChange: false },
+  { value: "credit", label: "Crédito", requiresReference: false, allowsChange: false },
   { value: "other", label: "Otro", requiresReference: false, allowsChange: false },
 ] as const;
 
@@ -35,9 +35,9 @@ function formatKg(value: number | string | null | undefined) {
 }
 
 function formatDateTime(iso?: string | null) {
-  if (!iso) return "â€”";
+  if (!iso) return "—";
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "â€”";
+  if (Number.isNaN(date.getTime())) return "—";
   return `${date.toLocaleDateString("es-MX")} ${date.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
@@ -50,7 +50,7 @@ function paymentMethodConfig(method: string) {
 }
 
 function paymentMethodLabel(method?: string) {
-  return PAYMENT_METHODS.find((item) => item.value === method)?.label ?? method ?? "â€”";
+  return PAYMENT_METHODS.find((item) => item.value === method)?.label ?? method ?? "—";
 }
 
 function operationTone(status?: string) {
@@ -143,14 +143,14 @@ function openPurchaseReceipt(payment: Payment, operation?: PurchaseOperation | n
     "Comprobante de pago",
     rows,
     [
-      ["Operacion:", `<span class="smallcaps">${operation?.folio ?? payment.operation_folio ?? "â€”"}</span>`],
+      ["Operacion:", `<span class="smallcaps">${operation?.folio ?? payment.operation_folio ?? "—"}</span>`],
       ["Pago:", `<span class="smallcaps">${payment.folio ?? payment.id}</span>`],
       ["Fecha:", formatDateTime(payment.paid_at)],
-      ["Cajero:", payment.received_by_name ?? "â€”"],
-      ["Cliente:", operation?.customer_name ?? operation?.customer_trade_name ?? operation?.customer_legal_name ?? "â€”"],
+      ["Cajero:", payment.received_by_name ?? "—"],
+      ["Cliente:", operation?.customer_name ?? operation?.customer_trade_name ?? operation?.customer_legal_name ?? "—"],
       ["Metodo:", payment.method_label ?? payment.method],
-      ["Referencia:", payment.reference ?? "â€”"],
-      ["Estado:", operation?.status_label ?? operation?.status ?? "â€”"],
+      ["Referencia:", payment.reference ?? "—"],
+      ["Estado:", operation?.status_label ?? operation?.status ?? "—"],
     ],
     [
       ["Total operacion", formatMoney(operation?.total_amount)],
@@ -186,14 +186,14 @@ function openSaleReceipt(payment: SalePayment, sale?: SaleOrder | null, items: S
     "Comprobante de venta",
     rows,
     [
-      ["Venta:", `<span class="smallcaps">${sale?.folio ?? payment.sale_order_folio ?? "â€”"}</span>`],
+      ["Venta:", `<span class="smallcaps">${sale?.folio ?? payment.sale_order_folio ?? "—"}</span>`],
       ["Pago:", `<span class="smallcaps">${payment.folio ?? payment.id}</span>`],
       ["Fecha:", formatDateTime(payment.paid_at)],
-      ["Cajero:", payment.received_by_name ?? "â€”"],
-      ["Cliente:", sale?.buyer_name ?? "â€”"],
+      ["Cajero:", payment.received_by_name ?? "—"],
+      ["Cliente:", sale?.buyer_name ?? "—"],
       ["Metodo:", payment.method_label ?? payment.method],
-      ["Referencia:", payment.reference ?? "â€”"],
-      ["Estado:", sale?.status_label ?? sale?.status ?? "â€”"],
+      ["Referencia:", payment.reference ?? "—"],
+      ["Estado:", sale?.status_label ?? sale?.status ?? "—"],
     ],
     [
       ["Total venta", formatMoney(sale?.total_amount)],
@@ -854,3 +854,4 @@ export function CashierPage() {
     </Page>
   );
 }
+

@@ -10,7 +10,6 @@ from apps.auditing.services import register_audit_event
 from apps.core.utils import generate_folio
 from apps.devices.models import Device
 from apps.inventory.models import InventoryMovement
-from apps.inventory.services import create_inventory_movement
 from apps.payments.services import calculate_paid_amount, sync_payment_status
 from apps.weighing.models import WeighingSession
 
@@ -104,8 +103,8 @@ def change_operation_status(
         raise ValidationError("La compra solo puede confirmarse cuando esta pagada por completo.")
     if new_status == PurchaseOperation.Status.CANCELLED:
         active_payments = operation.payments.exclude(status__exact="cancelled").exists()
-        if operation.print_status != PurchaseOperation.PrintStatus.PENDING or operation.payment_status != PurchaseOperation.PaymentStatus.PENDING or active_payments:
-            raise ValidationError("No se puede cancelar una compra con ticket emitido o con pago registrado.")
+        if operation.payment_status != PurchaseOperation.PaymentStatus.PENDING or active_payments:
+            raise ValidationError("No se puede cancelar una compra con pago registrado.")
     if new_status == PurchaseOperation.Status.COMPLETED and operation.payment_status != PurchaseOperation.PaymentStatus.PAID:
         if not getattr(user, "is_staff", False) and not getattr(user, "is_superuser", False):
             raise ValidationError("La operacion no puede cerrarse sin estar pagada por completo.")
@@ -193,7 +192,6 @@ def register_ticket_item(*, operation: PurchaseOperation, material, method: str,
         confirmed_at=timezone.now(),
     )
     calculate_ticket_item_amount(item)
-    create_inventory_movement(ticket_item=item, user=user)
     recalculate_operation_total(operation)
     register_audit_event(actor=user, action="confirm_ticket_item", entity=item, details={"method": method, "net_weight_kg": str(net_weight_kg)})
     return item
@@ -275,28 +273,32 @@ def update_ticket_item(
     )
 
     movement = ticket_item.inventory_movements.order_by("occurred_at").first()
-    if movement and not after_print:
-        movement.material = ticket_item.material
-        movement.collection_center = operation.collection_center
-        movement.quantity_kg = ticket_item.net_weight_kg
-        movement.unit_price = ticket_item.unit_price
-        movement.amount = ticket_item.amount
-        movement.notes = ticket_item.notes
-        movement.save(update_fields=["material", "collection_center", "quantity_kg", "unit_price", "amount", "notes", "updated_at"])
-    else:
-        delta_quantity = ticket_item.net_weight_kg - previous_quantity if movement else ticket_item.net_weight_kg
-        delta_amount = ticket_item.amount - previous_amount if movement else ticket_item.amount
-        create_inventory_movement(
-            ticket_item=ticket_item,
-            user=user,
-            movement_type=InventoryMovement.MovementType.ADJUSTMENT if after_print else InventoryMovement.MovementType.INBOUND,
-            material=ticket_item.material,
-            collection_center=operation.collection_center,
-            quantity_kg=delta_quantity,
-            unit_price=ticket_item.unit_price,
-            amount=delta_amount,
-            notes=reason or ticket_item.notes,
-        )
+    operation_paid = operation.payment_status == PurchaseOperation.PaymentStatus.PAID
+    if operation_paid:
+        if movement and not after_print:
+            movement.material = ticket_item.material
+            movement.collection_center = operation.collection_center
+            movement.quantity_kg = ticket_item.net_weight_kg
+            movement.unit_price = ticket_item.unit_price
+            movement.amount = ticket_item.amount
+            movement.notes = ticket_item.notes
+            movement.save(update_fields=["material", "collection_center", "quantity_kg", "unit_price", "amount", "notes", "updated_at"])
+        else:
+            delta_quantity = ticket_item.net_weight_kg - previous_quantity if movement else ticket_item.net_weight_kg
+            delta_amount = ticket_item.amount - previous_amount if movement else ticket_item.amount
+            from apps.inventory.services import create_inventory_movement
+
+            create_inventory_movement(
+                ticket_item=ticket_item,
+                user=user,
+                movement_type=InventoryMovement.MovementType.ADJUSTMENT if after_print else InventoryMovement.MovementType.INBOUND,
+                material=ticket_item.material,
+                collection_center=operation.collection_center,
+                quantity_kg=delta_quantity,
+                unit_price=ticket_item.unit_price,
+                amount=delta_amount,
+                notes=reason or ticket_item.notes,
+            )
 
     recalculate_operation_total(operation)
     sync_payment_status(operation)

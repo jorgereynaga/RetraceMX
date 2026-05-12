@@ -185,15 +185,6 @@ class TicketItemViewSet(viewsets.ModelViewSet):
                 "amount": str(item.amount),
             },
         )
-        inventory_movements = list(item.inventory_movements.all())
-        for movement in inventory_movements:
-            register_audit_event(
-                actor=request.user,
-                action="delete_inventory_movement",
-                entity=movement,
-                details={"reason": "ticket_item_deleted", "ticket_item_id": str(item.pk)},
-            )
-            movement.delete()
         item.delete()
         recalculate_operation_total(operation)
         return response.Response(status=status.HTTP_204_NO_CONTENT)
@@ -245,14 +236,9 @@ class TicketItemViewSet(viewsets.ModelViewSet):
     @decorators.action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
         item = self.get_object()
-        was_confirmed = item.status == TicketItem.Status.CONFIRMED
         item.status = TicketItem.Status.CONFIRMED
         item.confirmed_by = request.user
         item.save(update_fields=["status", "confirmed_by", "updated_at"])
         register_audit_event(actor=request.user, action="confirm_ticket_item", entity=item, details={"manual": True})
-        if not was_confirmed and not item.inventory_movements.exists():
-            from apps.inventory.services import create_inventory_movement
-
-            create_inventory_movement(ticket_item=item, user=request.user)
         recalculate_operation_total(item.operation)
         return response.Response(self.get_serializer(item).data)

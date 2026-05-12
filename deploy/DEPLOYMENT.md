@@ -48,6 +48,8 @@ Recommended values:
 - `DJANGO_CSRF_COOKIE_SECURE=1`
 - `DJANGO_SESSION_COOKIE_SECURE=1`
 - `DJANGO_SECURE_SSL_REDIRECT=1`
+- `SEED_DEMO=0` after the first deploy
+- Keep `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` aligned with `DATABASE_URL`
 
 ## Deployment commands
 
@@ -56,6 +58,8 @@ Clone the repository on the server and then run:
 ```bash
 bash deploy/server-deploy.sh
 ```
+
+If this is the first deployment and you want demo data seeded, set `SEED_DEMO=1` temporarily in `.env.production`, run the deployment once, and then return it to `0`.
 
 Check status:
 

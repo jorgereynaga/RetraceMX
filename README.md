@@ -1,45 +1,120 @@
 # ReTrace MX
 
-Plataforma base de gestión operativa y trazabilidad para recicladoras.
+ReTrace MX es una plataforma operativa y de trazabilidad para empresas recicladoras. El sistema organiza la compra de materiales, el pesaje, la caja, el inventario, la comercialización, la logística y la auditoría bajo un núcleo de dominio desacoplado de la interfaz.
 
-## Objetivo
+## Enfoque funcional
 
-El repositorio inicial implementa una base funcional para:
+La plataforma está diseñada para cubrir el ciclo operativo completo:
 
-- compra y operación central por ticket,
-- múltiples partidas por operación,
-- pesaje vehicular diferencial y pesaje individual,
-- caja y pagos,
-- inventario y movimientos,
+- clientes y generadores,
+- centros de acopio,
+- rutas y transporte,
+- recepción y pesaje,
+- inventario por material,
+- comercialización de compra y venta,
+- documentación y evidencias,
 - trazabilidad y auditoría,
-- impresión térmica desacoplada,
-- simulación de básculas USB,
-- frontend React + TypeScript para operación y consulta.
+- reportes y analítica.
+
+La operación central es el ticket de compra. Cada operación puede tener varias partidas, cada partida puede capturarse por báscula vehicular o báscula secundaria, y el inventario se materializa al pago.
+
+## Contexto normativo
+
+El diseño funcional considera como base la LGPGIR y, para residuos de manejo especial, la NOM-161-SEMARNAT-2011. El sistema está orientado a:
+
+- prevención y valorización,
+- gestión integral,
+- uniformidad de inventarios,
+- trazabilidad documental,
+- control de recolección, acopio y salida comercial.
 
 ## Stack
 
 - Backend: Django
 - API: Django REST Framework
 - Base de datos: PostgreSQL
-- Pruebas: pytest + pytest-django
 - Frontend: React + TypeScript + Vite
+- Pruebas backend: pytest + pytest-django
+- Integración de dispositivos: capa desacoplada con simuladores y adaptadores
 
-## Estructura
+## Estructura del repositorio
 
-- `backend/`: núcleo Django, dominio, API, auditoría y pruebas
-- `frontend/`: interfaz React inicial
-- `docs/`: notas técnicas y decisiones base
-- `.env.example`: variables de entorno de referencia
+- `backend/`: núcleo Django, apps de dominio, API, auditoría y pruebas
+- `frontend/`: aplicación React operativa
+- `docs/`: arquitectura, integración de dispositivos y notas técnicas
+- `deploy/`: despliegue local y de producción
+- `.env.example`: variables de entorno para desarrollo
+- `.env.production.example`: variables para producción
+- `docker-compose.yml`: entorno local con PostgreSQL, backend y frontend
+- `docker-compose.prod.yml`: entorno de producción con reverse proxy y HTTPS
 
-## Cómo correr el backend
+## Apps principales del backend
 
-1. Crear entorno virtual e instalar dependencias de `backend/requirements.txt`.
-2. Copiar `.env.example` a `.env`.
-3. Ejecutar migraciones.
-4. Cargar datos iniciales con `python manage.py seed_demo` si quieres una base de prueba.
-5. Levantar el servidor.
+- `users`: autenticación, usuarios, roles y permisos
+- `parties`: personas, empresas, centros de acopio, vehículos y conductores
+- `materials`: familias, materiales y listas de precios
+- `logistics`: rutas, viajes, entregas, GPS y evidencias logísticas
+- `devices`: básculas, impresoras térmicas y simuladores
+- `weighing`: sesiones de pesaje y lecturas de báscula
+- `operations`: operaciones de compra y partidas del ticket
+- `payments`: caja, pagos y cancelaciones
+- `inventory`: movimientos y resumen de inventario
+- `commercialization`: ventas, partidas y pagos de venta
+- `evidence`: bitácoras de impresión, custodia y archivos
+- `auditing`: eventos de auditoría
+- `reporting`: KPIs y reportes básicos
 
-Ejemplo:
+## Flujo operativo principal
+
+1. Se abre una operación de compra.
+2. Se agregan una o más partidas.
+3. Cada partida puede capturarse con:
+   - diferencia vehicular,
+   - báscula secundaria directa,
+   - contingencia manual.
+4. Se calcula peso neto e importe.
+5. Se imprime el ticket térmico.
+6. Se registra el pago en caja.
+7. Al quedar pagada la compra, se confirma y se materializa el inventario.
+8. Se conserva historial, reimpresión y auditoría.
+
+## Modelos principales
+
+- `User`
+- `Role`
+- `CommercialRole`
+- `PersonOrCompany`
+- `Vehicle`
+- `Driver`
+- `CollectionCenter`
+- `MaterialFamily`
+- `Material`
+- `PriceList`
+- `Route`
+- `Device`
+- `WeighingSession`
+- `ScaleReading`
+- `PurchaseOperation`
+- `TicketItem`
+- `Payment`
+- `PrintLog`
+- `InventoryMovement`
+- `CustodyEvent`
+- `EvidenceFile`
+- `AuditLog`
+
+## Cómo correr el proyecto en local
+
+### Con Docker
+
+```bash
+docker compose up --build
+```
+
+- Frontend: `http://localhost:5000`
+- API: `http://localhost:8001`
+
+### Backend sin Docker
 
 ```bash
 cd backend
@@ -47,39 +122,10 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py createsuperuser
 python manage.py runserver
 ```
 
-## Con Docker (desarrollo)
-
-```bash
-docker compose up --build
-```
-
-## Despliegue en servidor
-
-Para ReTrace MX en producción usa:
-
-1. Copia `.env.production.example` a `.env.production` y ajusta secretos.
-2. Apunta los DNS:
-   - `retracemx.softwaresci.org` -> `64.23.234.101`
-   - `apiretracemx.softwaresci.org` -> `64.23.234.101`
-3. Levanta la pila de producción:
-
-```bash
-docker compose -f docker-compose.prod.yml up --build -d
-```
-
-La pila de producción incluye:
-
-- backend Django con `gunicorn`,
-- frontend compilado en estático,
-- Caddy como reverse proxy con HTTPS automático para ambos subdominios.
-
-Si tu proveedor bloquea los puertos 80/443, abre esos puertos en el firewall del servidor.
-
-## Cómo correr el frontend
+### Frontend sin Docker
 
 ```bash
 cd frontend
@@ -89,7 +135,23 @@ npm run dev
 
 ## Variables de entorno
 
-Revisa `.env.example` para desarrollo y `.env.production.example` para servidor. El backend usa `DATABASE_URL`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` y `DJANGO_CORS_ALLOWED_ORIGINS`.
+Revisa estos archivos:
+
+- `.env.example`
+- `.env.production.example`
+
+Variables clave:
+
+- `DATABASE_URL`
+- `DJANGO_SECRET_KEY`
+- `DJANGO_DEBUG`
+- `DJANGO_ALLOWED_HOSTS`
+- `DJANGO_CSRF_TRUSTED_ORIGINS`
+- `DJANGO_CORS_ALLOWED_ORIGINS`
+- `FRONTEND_URL`
+- `DJANGO_SUPERUSER_USERNAME`
+- `DJANGO_SUPERUSER_PASSWORD`
+- `SEED_DEMO`
 
 ## Pruebas
 
@@ -98,32 +160,50 @@ cd backend
 pytest
 ```
 
-## Flujo principal ya cubierto
+También puedes correr el chequeo de Django:
 
-- apertura de operación,
-- partidas con pesaje diferencial o individual,
-- cálculo de importe y total de ticket,
-- registro de inventario,
-- registro de pago con validación de saldo,
-- cierre de operación condicionado a liquidación,
-- impresión y reimpresión auditadas,
-- cambio de precio auditado en listas de precios,
-- auditoría básica,
-- reporte básico de operación,
-- simulación de báscula e impresora.
+```bash
+python manage.py check
+```
 
-## Decisiones clave
+## Dispositivos
 
-- La operación central es el ticket de compra.
-- El pesaje vive desacoplado de la UI.
-- Toda partida confirmada genera inventario.
-- Auditoría explícita para cambios sensibles.
-- Integraciones de dispositivos con simuladores reemplazables por hardware real.
+La integración física está desacoplada del frontend. La base incluye:
+
+- simulación de báscula vehicular USB,
+- simulación de báscula secundaria USB,
+- simulación de impresora térmica Epson POS,
+- interfaces para adaptadores reales por puerto serie o middleware local.
+
+Consulta:
+
+- [docs/device-integration.md](docs/device-integration.md)
+
+## Despliegue
+
+Producción:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+La pila de producción usa:
+
+- backend Django con Gunicorn,
+- frontend compilado a estático,
+- PostgreSQL,
+- Caddy como reverse proxy con HTTPS automático.
+
+## Documentación técnica
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/domain-model.md](docs/domain-model.md)
+- [docs/device-integration.md](docs/device-integration.md)
 
 ## Siguientes pasos sugeridos
 
-1. Conectar un conector real de báscula USB por puerto serie/driver.
-2. Completar reglas de impresión Epson POS con plantillas reales.
-3. Agregar dashboards y reportes operativos más avanzados.
-4. Implementar flujo de cancelación y ajustes con doble validación.
-5. Incorporar geolocalización futura para rutas y recolección.
+1. Conectar una báscula USB real por puerto serie virtual o driver OEM.
+2. Sustituir la impresión simulada por Epson POS real.
+3. Completar flujos de geolocalización para rutas.
+4. Endurecer reglas de cancelación, reimpresión y ajustes con doble validación.
+5. Agregar reportes operativos y analítica avanzada por centro, material y período.

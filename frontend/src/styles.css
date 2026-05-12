@@ -331,6 +331,37 @@ button:active { transform: scale(0.98); }
   line-height: 1.05;
 }
 
+.processing-top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.processing-workspace {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.processing-workspace > .card:first-child {
+  position: sticky;
+  top: 16px;
+  z-index: 2;
+}
+
+.processing-three-up {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.processing-two-up {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
 .metric-panel span { color: var(--muted); font-size: 0.82rem; }
 .metric-panel strong { display: block; margin-top: 8px; font-size: 1.5rem; }
 
@@ -517,6 +548,17 @@ textarea { min-height: 84px; resize: vertical; }
 }
 
 .inline-form textarea { width: 100%; }
+
+.grid-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+}
+
+.grid-form > .full-width-form-field {
+  grid-column: 1 / -1;
+}
 
 .full-width-form-field { grid-column: 1 / -1; }
 
@@ -966,6 +1008,9 @@ textarea { min-height: 84px; resize: vertical; }
   .sidebar { height: auto; position: static; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--border); }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .metric-grid { grid-template-columns: 1fr; }
+  .processing-top-grid,
+  .processing-three-up,
+  .processing-two-up { grid-template-columns: 1fr; }
   .users-stats-row { gap: 12px; }
   .users-stats-row .metric-panel { min-width: 200px; }
   .price-list-form, .price-item-form { grid-template-columns: 1fr; }

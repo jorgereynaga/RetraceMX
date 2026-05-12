@@ -8,8 +8,10 @@ import { PartiesPage } from "./pages/PartiesPage";
 import { CentersPage } from "./pages/CentersPage";
 import { RoutesPage } from "./pages/RoutesPage";
 import { PriceListsPage } from "./pages/PriceListsPage";
+import { ProcessTypesPage } from "./pages/ProcessTypesPage";
 import { OperationsPage } from "./pages/OperationsPage";
 import { PurchasePage } from "./pages/PurchasePage";
+import { ProcessingPage } from "./pages/ProcessingPage";
 import { WeighingPage } from "./pages/WeighingPage";
 import { TicketPage } from "./pages/TicketPage";
 import { CashierPage } from "./pages/CashierPage";
@@ -37,7 +39,9 @@ export function App() {
         <Route path="/centers" element={<CentersPage />} />
         <Route path="/routes" element={<RoutesPage />} />
         <Route path="/price-lists" element={<PriceListsPage />} />
+        <Route path="/process-types" element={<ProcessTypesPage />} />
         <Route path="/compra" element={<PurchasePage />} />
+        <Route path="/processing" element={<ProcessingPage />} />
         <Route path="/operations" element={<OperationsPage />} />
         <Route path="/weighing" element={<WeighingPage />} />
         <Route path="/ticket" element={<TicketPage />} />

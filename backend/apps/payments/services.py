@@ -8,7 +8,9 @@ from django.utils import timezone
 
 from apps.auditing.services import register_audit_event
 from apps.core.utils import generate_folio
+from apps.inventory.services import post_operation_inventory, retract_operation_inventory
 from apps.operations.models import TicketItem
+from apps.weighing.models import WeighingSession
 
 from .models import Payment
 
@@ -23,6 +25,7 @@ def calculate_paid_amount(operation) -> Decimal:
 
 def sync_payment_status(operation):
     paid_amount = calculate_paid_amount(operation)
+    closed_sessions = 0
     if paid_amount <= 0:
         operation.payment_status = operation.PaymentStatus.PENDING
         operation.confirmed_at = None
@@ -38,7 +41,18 @@ def sync_payment_status(operation):
         if operation.status != operation.Status.COMPLETED:
             operation.status = operation.Status.CONFIRMED
             operation.confirmed_at = timezone.now()
+        closed_sessions = operation.weighing_sessions.filter(status=WeighingSession.Status.OPEN).update(
+            status=WeighingSession.Status.CLOSED,
+            ended_at=timezone.now(),
+        )
     operation.save(update_fields=["payment_status", "status", "confirmed_at", "updated_at"])
+    if closed_sessions:
+        register_audit_event(
+            actor=None,
+            action="close_weighing_sessions_on_payment",
+            entity=operation,
+            details={"closed_sessions": closed_sessions, "paid_amount": str(paid_amount)},
+        )
     return operation
 
 
@@ -110,6 +124,8 @@ def register_payment(
         notes=notes,
     )
     sync_payment_status(operation)
+    if operation.payment_status == operation.PaymentStatus.PAID:
+        post_operation_inventory(operation=operation, user=received_by)
     register_audit_event(
         actor=received_by,
         action="register_payment",
@@ -135,6 +151,8 @@ def cancel_payment(*, payment: Payment, user, reason: str = "") -> Payment:
     payment.cancel_reason = reason
     payment.save(update_fields=["status", "cancelled_at", "cancelled_by", "cancel_reason", "updated_at"])
     sync_payment_status(payment.operation)
+    if payment.operation.payment_status != payment.operation.PaymentStatus.PAID:
+        retract_operation_inventory(operation=payment.operation, user=user, reason=reason or "payment_cancelled")
     register_audit_event(
         actor=user,
         action="cancel_payment",

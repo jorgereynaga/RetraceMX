@@ -1,10 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { userCan } from "../utils/permissions";
+import type { AppPermission } from "../utils/permissions";
 
 type NavSection = {
   label: string;
-  items: Array<{ to: string; label: string; icon: string }>;
+  items: Array<{ to: string; label: string; icon: string; permission?: AppPermission }>;
 };
 
 const navSections: NavSection[] = [
@@ -19,12 +20,14 @@ const navSections: NavSection[] = [
       { to: "/parties", label: "Personas / Empresas", icon: "PE" },
       { to: "/centers", label: "Centros de acopio", icon: "CA" },
       { to: "/price-lists", label: "Listas de precios", icon: "PR" },
+      { to: "/process-types", label: "Tipos de procesos", icon: "TP", permission: "processing.manage" },
     ],
   },
   {
     label: "Operacion",
     items: [
       { to: "/compra", label: "Compra de materiales", icon: "CO" },
+      { to: "/processing", label: "Procesamiento", icon: "PR" },
       { to: "/cashier", label: "Caja y pagos", icon: "CJ" },
       { to: "/inventory", label: "Inventarios", icon: "IN" },
     ],
@@ -67,7 +70,11 @@ export function AppShell() {
             <div key={section.label}>
               <div className="sidebar-section-label">{section.label}</div>
               {section.items
-                .filter((item) => item.to !== "/users" || userCan(user, "users.manage"))
+                .filter((item) => {
+                  if (item.to === "/users") return userCan(user, "users.manage");
+                  if (item.permission) return userCan(user, item.permission);
+                  return true;
+                })
                 .map(({ to, label, icon }) => (
                   <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
                     <span

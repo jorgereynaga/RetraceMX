@@ -47,10 +47,15 @@ export type Material = {
   code: string;
   name: string;
   family: string;
+  subfamily?: string;
   unit: string;
   valuation_possible: boolean;
   is_hazard_auxiliary: boolean;
   requires_special_review: boolean;
+  is_buyable?: boolean;
+  is_sellable?: boolean;
+  is_processable?: boolean;
+  is_processed?: boolean;
   is_active: boolean;
   default_merma_pct: string | null;
 };
@@ -260,19 +265,114 @@ export type InventoryMovement = {
   ticket_item?: string | null;
   sale_order?: string | null;
   sale_item?: string | null;
+  process?: string | null;
+  process_input?: string | null;
+  process_output?: string | null;
+  process_waste?: string | null;
+  lot_code?: string;
   material: string;
   material_name?: string | null;
+  material_is_processed?: boolean | null;
+  material_is_sellable?: boolean | null;
+  material_family_name?: string | null;
   collection_center: string;
   collection_center_name?: string | null;
-  movement_type: "inbound" | "outbound" | "adjustment";
+  movement_type:
+    | "inbound"
+    | "outbound"
+    | "adjustment"
+    | "purchase_in"
+    | "process_input_out"
+    | "process_output_in"
+    | "process_waste_out"
+    | "sale_out"
+    | "manual_adjustment_in"
+    | "manual_adjustment_out"
+    | "transfer_in"
+    | "transfer_out";
   movement_type_label?: string;
   quantity_kg: string;
   unit_price: string;
   amount: string;
   notes?: string;
+  source_reference?: string;
   created_by?: string | null;
   created_by_name?: string | null;
   occurred_at?: string;
+};
+
+export type LotTraceReport = {
+  lot_code: string;
+  process_outputs: Array<{
+    id: string;
+    process_folio: string;
+    process_type: string;
+    collection_center: string;
+    material: string;
+    material_name: string;
+    quantity: string;
+    unit: string;
+    lot_code: string;
+    created_at?: string | null;
+  }>;
+  sale_items: Array<{
+    id: string;
+    sale_order: string;
+    sale_folio: string;
+    collection_center: string;
+    material: string;
+    material_name: string;
+    quantity_kg: string;
+    unit_price: string;
+    amount: string;
+    lot_code: string;
+  }>;
+  inventory_movements: Array<{
+    id: string;
+    movement_type: string;
+    movement_type_label: string;
+    material: string;
+    material_name: string;
+    collection_center: string;
+    collection_center_name: string;
+    quantity_kg: string;
+    amount: string;
+    source_reference?: string;
+    lot_code?: string;
+    occurred_at: string;
+  }>;
+  processes: Array<{
+    id: string;
+    folio: string;
+    process_type: string;
+    collection_center: string;
+    status: string;
+    process_date: string;
+    notes: string;
+    inputs: Array<{
+      material: string;
+      material_name: string;
+      quantity: string;
+      unit: string;
+      source_inventory_reference: string;
+    }>;
+    outputs: Array<{
+      material: string;
+      material_name: string;
+      quantity: string;
+      unit: string;
+      lot_code: string;
+    }>;
+    wastes: Array<{
+      material?: string | null;
+      material_name?: string | null;
+      waste_type: string;
+      waste_type_label: string;
+      quantity: string;
+      unit: string;
+      notes: string;
+    }>;
+  }>;
 };
 
 export type InventoryBalance = {
@@ -280,6 +380,8 @@ export type InventoryBalance = {
   collection_center_name: string;
   material_id: string;
   material_name: string;
+  material_is_processed?: boolean;
+  material_is_sellable?: boolean;
   inbound_kg: string;
   outbound_kg: string;
   adjustment_kg: string;
@@ -353,6 +455,76 @@ export type SaleOrder = {
   negotiated_price_note?: string;
   notes?: string;
   created_at?: string;
+};
+
+export type ProcessType = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  active: boolean;
+};
+
+export type MaterialProcess = {
+  id: string;
+  folio: string;
+  process_type: string;
+  process_type_name?: string;
+  collection_center: string;
+  collection_center_name?: string;
+  process_date: string;
+  status: "draft" | "confirmed" | "cancelled";
+  notes?: string;
+  created_by?: string | null;
+  created_by_name?: string | null;
+  confirmed_by?: string | null;
+  confirmed_by_name?: string | null;
+  confirmed_at?: string | null;
+  canceled_by?: string | null;
+  canceled_by_name?: string | null;
+  canceled_at?: string | null;
+  cancellation_reason?: string;
+  inputs_count?: number;
+  outputs_count?: number;
+  wastes_count?: number;
+  inputs?: MaterialProcessInput[];
+  outputs?: MaterialProcessOutput[];
+  wastes?: MaterialProcessWaste[];
+};
+
+export type MaterialProcessInput = {
+  id: string;
+  process: string;
+  process_folio?: string;
+  material: string;
+  material_name?: string;
+  quantity: string;
+  unit: string;
+  source_inventory_reference?: string;
+};
+
+export type MaterialProcessOutput = {
+  id: string;
+  process: string;
+  process_folio?: string;
+  material: string;
+  material_name?: string;
+  quantity: string;
+  unit: string;
+  lot_code: string;
+};
+
+export type MaterialProcessWaste = {
+  id: string;
+  process: string;
+  process_folio?: string;
+  material?: string | null;
+  material_name?: string | null;
+  waste_type: "merma" | "waste" | "loss";
+  waste_type_label?: string;
+  quantity: string;
+  unit: string;
+  notes?: string;
 };
 
 export type SalePayment = {

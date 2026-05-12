@@ -28,10 +28,15 @@ class Material(UUIDTimeStampedModel):
     code = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=120)
     family = models.ForeignKey(MaterialFamily, on_delete=models.PROTECT, related_name="materials")
+    subfamily = models.CharField(max_length=120, blank=True)
     unit = models.CharField(max_length=20, choices=Unit.choices, default=Unit.KG)
     valuation_possible = models.BooleanField(default=True)
     is_hazard_auxiliary = models.BooleanField(default=False)
     requires_special_review = models.BooleanField(default=False)
+    is_buyable = models.BooleanField(default=True)
+    is_sellable = models.BooleanField(default=True)
+    is_processable = models.BooleanField(default=False)
+    is_processed = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     default_merma_pct = models.DecimalField(
         max_digits=5, decimal_places=4, null=True, blank=True,

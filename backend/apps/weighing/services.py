@@ -37,7 +37,6 @@ def register_scale_reading(*, session: WeighingSession, device, reading_type: st
 
 def register_individual_weight(*, operation, material, unit_price, net_weight_kg, merma_kg=0, method=None, scale_session=None, reading=None, created_by=None, notes=""):
     from apps.auditing.services import register_audit_event
-    from apps.inventory.services import create_inventory_movement
     from apps.operations.models import TicketItem
     from apps.operations.services import apply_tare_or_merma, calculate_ticket_item_amount
 
@@ -58,7 +57,5 @@ def register_individual_weight(*, operation, material, unit_price, net_weight_kg
         status=TicketItem.Status.CONFIRMED,
     )
     calculate_ticket_item_amount(item)
-    create_inventory_movement(ticket_item=item, user=created_by)
     register_audit_event(actor=created_by, action="register_individual_weight", entity=item, details={"method": method, "net_weight_kg": str(net_after_merma)})
     return item
-

@@ -4,29 +4,28 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 
 from apps.auditing.services import register_audit_event
 from apps.core.utils import generate_folio
 from apps.inventory.models import InventoryMovement
-from apps.inventory.services import create_inventory_movement
+from apps.inventory.services import create_inventory_movement, get_available_stock
 
 from .models import SaleItem, SaleOrder, SalePayment
-
-
-def get_available_stock(*, material, collection_center) -> Decimal:
-    inbound = InventoryMovement.objects.filter(material=material, collection_center=collection_center, movement_type=InventoryMovement.MovementType.INBOUND).aggregate(total=Sum("quantity_kg"))["total"] or Decimal("0")
-    adjustments = InventoryMovement.objects.filter(material=material, collection_center=collection_center, movement_type=InventoryMovement.MovementType.ADJUSTMENT).aggregate(total=Sum("quantity_kg"))["total"] or Decimal("0")
-    outbound = InventoryMovement.objects.filter(material=material, collection_center=collection_center, movement_type=InventoryMovement.MovementType.OUTBOUND).aggregate(total=Sum("quantity_kg"))["total"] or Decimal("0")
-    return Decimal(inbound) + Decimal(adjustments) - Decimal(outbound)
 
 
 def estimate_material_cost(*, material, collection_center, quantity_kg: Decimal) -> Decimal:
     inbound_movements = InventoryMovement.objects.filter(
         material=material,
         collection_center=collection_center,
-        movement_type__in=[InventoryMovement.MovementType.INBOUND, InventoryMovement.MovementType.ADJUSTMENT],
+        movement_type__in=[
+            InventoryMovement.MovementType.INBOUND,
+            InventoryMovement.MovementType.PURCHASE_IN,
+            InventoryMovement.MovementType.PROCESS_OUTPUT_IN,
+            InventoryMovement.MovementType.MANUAL_ADJUSTMENT_IN,
+            InventoryMovement.MovementType.TRANSFER_IN,
+            InventoryMovement.MovementType.ADJUSTMENT,
+        ],
     )
     total_inbound_qty = sum((movement.quantity_kg for movement in inbound_movements), Decimal("0"))
     total_inbound_amount = sum((movement.amount for movement in inbound_movements), Decimal("0"))
@@ -102,6 +101,8 @@ def add_sale_item(
     available_stock = get_available_stock(material=material, collection_center=sale_order.collection_center)
     if quantity_kg <= 0:
         raise ValidationError("La cantidad vendida debe ser mayor a cero.")
+    if quantity_kg > available_stock:
+        raise ValidationError("No hay inventario suficiente para esta venta.")
 
     amount = (quantity_kg * unit_price).quantize(Decimal("0.01"))
     estimated_cost = estimate_material_cost(material=material, collection_center=sale_order.collection_center, quantity_kg=quantity_kg)
@@ -124,7 +125,7 @@ def add_sale_item(
     )
     movement = create_inventory_movement(
         user=user,
-        movement_type=InventoryMovement.MovementType.OUTBOUND,
+        movement_type=InventoryMovement.MovementType.SALE_OUT,
         sale_order=sale_order,
         sale_item=sale_item,
         material=material,
@@ -133,6 +134,8 @@ def add_sale_item(
         unit_price=unit_price,
         amount=amount,
         notes=notes,
+        source_reference=sale_order.folio,
+        lot_code=lot_code or sale_item.lot_code or sale_order.folio,
     )
     sale_item.inventory_movement = movement
     sale_item.save(update_fields=["inventory_movement", "updated_at"])
@@ -267,6 +270,14 @@ def register_sale_payment(
         },
     )
     return payment
+
+
+def create_sale(**kwargs) -> SaleOrder:
+    return register_sale_order(**kwargs)
+
+
+def confirm_sale(sale_order: SaleOrder, user=None) -> SaleOrder:
+    return close_sale_order(sale_order, user=user)
 
 
 @transaction.atomic

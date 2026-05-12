@@ -1,10 +1,12 @@
 services:
   db:
     image: postgres:16
+    env_file:
+      - ./.env.production
     environment:
-      POSTGRES_DB: acopio360
-      POSTGRES_USER: acopio360
-      POSTGRES_PASSWORD: acopio360
+      POSTGRES_DB: ${POSTGRES_DB:-acopio360}
+      POSTGRES_USER: ${POSTGRES_USER:-acopio360}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-acopio360}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,9 +21,11 @@ services:
       context: ./backend
     env_file:
       - ./.env.production
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-acopio360}:${POSTGRES_PASSWORD:-acopio360}@db:5432/${POSTGRES_DB:-acopio360}
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py seed_demo &&
+             if [ \"${SEED_DEMO:-0}\" = \"1\" ]; then python manage.py seed_demo; fi &&
              python manage.py collectstatic --noinput &&
              gunicorn acopio360.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
     depends_on:
@@ -30,6 +34,12 @@ services:
     expose:
       - "8000"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/reports/basic/')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
   frontend:
     build:

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/resources";
-import type { CollectionCenter, Material, Party, PurchaseOperation, TicketItem, Vehicle } from "../types";
+import type { CollectionCenter, Material, Party, PrintLog, PurchaseOperation, TicketItem, Vehicle } from "../types";
 import { Page } from "../components/Page";
 import { Pagination } from "../components/Pagination";
 import { TicketViewer } from "../components/TicketViewer";
@@ -59,6 +59,7 @@ export function HistoryPage() {
   const [parties, setParties] = useState<Party[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [printLogs, setPrintLogs] = useState<PrintLog[]>([]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedItems, setSelectedItems] = useState<TicketItem[]>([]);
@@ -82,12 +83,14 @@ export function HistoryPage() {
       api.parties().catch(() => [] as Party[]),
       api.vehicles().catch(() => [] as Vehicle[]),
       api.materials().catch(() => [] as Material[]),
-    ]).then(([ops, ctrs, pts, vehs, mats]) => {
+      api.printLogs().catch(() => [] as PrintLog[]),
+    ]).then(([ops, ctrs, pts, vehs, mats, logs]) => {
       setOperations(ops as PurchaseOperation[]);
       setCenters(ctrs as CollectionCenter[]);
       setParties(pts as Party[]);
       setVehicles(vehs as Vehicle[]);
       setMaterials(mats as Material[]);
+      setPrintLogs(logs as PrintLog[]);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -192,6 +195,24 @@ export function HistoryPage() {
     const amount = selectedItems.reduce((sum, item) => sum + money(item.amount), 0);
     return { weight, amount };
   }, [selectedItems]);
+
+  const selectedPrints = useMemo(() => {
+    return [...printLogs]
+      .filter((log) => log.operation === selectedId)
+      .sort((a, b) => new Date(b.printed_at).getTime() - new Date(a.printed_at).getTime());
+  }, [printLogs, selectedId]);
+
+  async function reprintLatestTicket() {
+    const latest = selectedPrints[0];
+    if (!latest) return;
+    try {
+      await api.reprintLog(latest.id);
+      const refreshedLogs = await api.printLogs().catch(() => [] as PrintLog[]);
+      setPrintLogs(refreshedLogs as PrintLog[]);
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
   return (
     <Page title="Historial de compras">
@@ -411,8 +432,15 @@ export function HistoryPage() {
                   <>
                     <div className="section-panel" style={{ boxShadow: "none" }}>
                       <div className="section-panel-header">
-                        <h3>Resumen de partidas</h3>
-                        <span className="badge badge-gray">{fmtKg(selectedSummary.weight)} | {fmtMXN(selectedSummary.amount)}</span>
+                        <h3>Vista previa del ticket</h3>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          {selectedPrints[0] && (
+                            <button className="btn-ghost" type="button" onClick={reprintLatestTicket}>
+                              Reimprimir ticket
+                            </button>
+                          )}
+                          <span className="badge badge-gray">{fmtKg(selectedSummary.weight)} | {fmtMXN(selectedSummary.amount)}</span>
+                        </div>
                       </div>
                     </div>
                     <TicketViewer

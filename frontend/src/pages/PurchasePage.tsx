@@ -292,7 +292,7 @@ export function PurchasePage() {
 
   const canAddItemManual = !!operation && !!materialId && method === "manual_contingency" && !!manualGross && netClean > 0 && !confirmed;
   const canAddItemDirect = !!operation && !!materialId && method === "secondary_direct" && !!grossKg && netClean > 0 && !confirmed;
-  const canCancelOperation = !!operation && operation.print_status === "pending" && operation.payment_status === "pending" && !confirmed;
+  const canCancelOperation = !!operation && operation.payment_status === "pending" && !confirmed;
   const isCancelledOperation = operation?.status === "cancelled";
 
   function captureGross() {
@@ -587,10 +587,10 @@ export function PurchasePage() {
     if (!canManagePurchases) { setItemMsg("No tienes permiso para cancelar compras."); return; }
     if (!operation) return;
     if (!canCancelOperation) {
-      setItemMsg("No se puede cancelar: ya hay ticket emitido o pago registrado.");
+      setItemMsg("No se puede cancelar: ya hay pago registrado.");
       return;
     }
-    if (!window.confirm("¿Cancelar esta compra antes de emitir ticket o registrar pago?")) return;
+    if (!window.confirm("¿Cancelar esta compra antes de registrar pago?")) return;
     setConfirming(true);
     try {
       await api.operationStatusChange(operation.id, "cancelled", "Cancelación antes de ticket y pago");

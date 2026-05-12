@@ -161,7 +161,7 @@ export function LogisticsPage() {
 
     if (selectedVehicleGps?.lat && selectedVehicleGps?.lng) {
       points.push({
-        label: "Ubicacion actual",
+        label: "Ubicación actual",
         latitude: Number(selectedVehicleGps.lat),
         longitude: Number(selectedVehicleGps.lng),
         kind: "telemetry",
@@ -229,10 +229,12 @@ export function LogisticsPage() {
     }
   }
 
+  const recentDeliveries = useMemo(() => [...deliveries].slice(0, 8), [deliveries]);
+
   return (
-    <Page title="Logistica" actions={<span className="muted">Programacion de entregas y seguimiento operativo</span>}>
+    <Page title="Logística" actions={<span className="muted">Programación de entregas y seguimiento operativo</span>}>
       <div style={{ display: "grid", gap: 20 }}>
-        <div className="grid"  style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 16 }}>
+        <section className="metric-grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", marginBottom: 16 }}>
           <div className="metric-panel">
             <span className="metric-label">Ventas por programar</span>
             <strong className="metric-value">{pendingSales.length.toLocaleString("es-MX")}</strong>
@@ -249,14 +251,14 @@ export function LogisticsPage() {
             <span className="metric-label">Unidades disponibles</span>
             <strong className="metric-value">{vehicles.length.toLocaleString("es-MX")}</strong>
           </div>
-        </div>
+        </section>
 
         <section className="section-panel">
           <div className="section-panel-header">
             <h3>Ventas pendientes de entrega</h3>
-            <span className="muted">Selecciona una venta para preparar su entrega</span>
+            <span className="muted">Selecciona una venta para preparar su salida</span>
           </div>
-          <div className="section-panel-body">
+          <div className="section-panel-body" style={{ overflowX: "auto" }}>
             <table className="table">
               <thead>
                 <tr>
@@ -305,16 +307,16 @@ export function LogisticsPage() {
           </div>
         </section>
 
-        <section className="section-panel">
-          <div className="section-panel-header">
-            <h3>Programacion de entrega</h3>
-            <span className="muted">Materiales, destino, transporte y responsable de recepcion</span>
-          </div>
-          <div className="section-panel-body">
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1.1fr", gap: 16 }}>
-              <form className="inline-form" onSubmit={createDelivery}>
+        <div className="processing-two-up">
+          <section className="section-panel">
+            <div className="section-panel-header">
+              <h3>Programación de entrega</h3>
+              <span className="muted">Destino, transporte y responsable de recepción</span>
+            </div>
+            <div className="section-panel-body">
+              <form className="grid-form" onSubmit={createDelivery}>
                 <label>
-                  Destino registrado
+                  Ruta / destino
                   <select value={selectedRouteId} onChange={(e) => setSelectedRouteId(e.target.value)}>
                     <option value="">Seleccionar ruta / destino</option>
                     {routes.map((route) => (
@@ -334,23 +336,23 @@ export function LogisticsPage() {
                 </label>
 
                 <label>
-                  Fecha de entrega
+                  Fecha
                   <input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
                 </label>
 
                 <label>
-                  Ventana inicio
+                  Inicio
                   <input type="time" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} />
                 </label>
 
                 <label>
-                  Ventana fin
+                  Fin
                   <input type="time" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} />
                 </label>
 
                 <label>
-                  Forma de transporte
-                  <input value={transportMode} onChange={(e) => setTransportMode(e.target.value)} placeholder="Camion, torton, trailer..." />
+                  Transporte
+                  <input value={transportMode} onChange={(e) => setTransportMode(e.target.value)} placeholder="Camión, torton, tráiler..." />
                 </label>
 
                 <label>
@@ -369,8 +371,8 @@ export function LogisticsPage() {
                 </label>
 
                 <label>
-                  Telefono
-                  <input value={receiverPhone} onChange={(e) => setReceiverPhone(e.target.value)} placeholder="Telefono de contacto" />
+                  Teléfono
+                  <input value={receiverPhone} onChange={(e) => setReceiverPhone(e.target.value)} placeholder="Teléfono de contacto" />
                 </label>
 
                 <label className="full-width-form-field">
@@ -383,7 +385,7 @@ export function LogisticsPage() {
                 </label>
 
                 <label className="full-width-form-field">
-                  Asignacion actual
+                  Asignación actual
                   <div className="muted">
                     {selectedRoute
                       ? `${routeLabel(selectedRoute)} · ${selectedRouteOrigin ? centerLabel(selectedRouteOrigin) : "-"} -> ${selectedRouteDestination ? centerLabel(selectedRouteDestination) : "-"}`
@@ -395,119 +397,119 @@ export function LogisticsPage() {
                   Programar entrega
                 </button>
               </form>
+            </div>
+          </section>
 
-              <div style={{ display: "grid", gap: 12 }}>
-                <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-                  <div className="metric-panel">
-                    <span>Materiales</span>
-                    <strong>{selectedSaleItems.length}</strong>
-                  </div>
-                  <div className="metric-panel">
-                    <span>Kg seleccionados</span>
-                    <strong>{kg(selectedSaleItems.reduce((sum, item) => sum + Number(item.quantity_kg ?? 0), 0))}</strong>
-                  </div>
-                  <div className="metric-panel">
-                    <span>GPS</span>
-                    <strong>{selectedVehicleGps ? "Disponible" : "Sin senal"}</strong>
-                  </div>
-                  <div className="metric-panel">
-                    <span>Entregas de la venta</span>
-                    <strong>{selectedSaleDeliveries.length}</strong>
-                  </div>
-                </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+              <div className="metric-panel">
+                <span>Materiales</span>
+                <strong>{selectedSaleItems.length}</strong>
+              </div>
+              <div className="metric-panel">
+                <span>Kg seleccionados</span>
+                <strong>{kg(selectedSaleItems.reduce((sum, item) => sum + Number(item.quantity_kg ?? 0), 0))}</strong>
+              </div>
+              <div className="metric-panel">
+                <span>GPS</span>
+                <strong>{selectedVehicleGps ? "Disponible" : "Sin señal"}</strong>
+              </div>
+              <div className="metric-panel">
+                <span>Entregas de la venta</span>
+                <strong>{selectedSaleDeliveries.length}</strong>
+              </div>
+            </div>
 
-                <div className="section-panel" style={{ boxShadow: "none" }}>
-                  <div className="section-panel-header">
-                    <h3>Materiales de la venta</h3>
-                    <span className="muted">Marca que partidas iran en esta entrega</span>
-                  </div>
-                  <div className="section-panel-body">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th></th>
-                          <th>Material</th>
-                          <th>Presentacion</th>
-                          <th>Calidad</th>
-                          <th>Kg</th>
-                          <th>Importe</th>
+            <section className="section-panel" style={{ boxShadow: "none" }}>
+              <div className="section-panel-header">
+                <h3>Materiales de la venta</h3>
+                <span className="muted">Marca qué partidas irán en esta entrega</span>
+              </div>
+              <div className="section-panel-body" style={{ overflowX: "auto" }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>Material</th>
+                      <th>Presentación</th>
+                      <th>Calidad</th>
+                      <th>Kg</th>
+                      <th>Importe</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedSaleItems.map((item) => {
+                      const checked = selectedItemIds.includes(item.id);
+                      return (
+                        <tr key={item.id}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setSelectedItemIds((current) =>
+                                  e.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id),
+                                );
+                              }}
+                            />
+                          </td>
+                          <td>{item.material_name ?? item.material}</td>
+                          <td>{item.presentation || "-"}</td>
+                          <td>{item.quality || "-"}</td>
+                          <td>{kg(item.quantity_kg)}</td>
+                          <td>{money(item.amount)}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {selectedSaleItems.map((item) => {
-                          const checked = selectedItemIds.includes(item.id);
-                          return (
-                            <tr key={item.id}>
-                              <td>
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={(e) => {
-                                    setSelectedItemIds((current) =>
-                                      e.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id),
-                                    );
-                                  }}
-                                />
-                              </td>
-                              <td>{item.material_name ?? item.material}</td>
-                              <td>{item.presentation || "-"}</td>
-                              <td>{item.quality || "-"}</td>
-                              <td>{kg(item.quantity_kg)}</td>
-                              <td>{money(item.amount)}</td>
-                            </tr>
-                          );
-                        })}
-                        {!selectedSaleItems.length ? (
-                          <tr>
-                            <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                              Selecciona una venta para ver sus partidas.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                      );
+                    })}
+                    {!selectedSaleItems.length ? (
+                      <tr>
+                        <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                          Selecciona una venta para ver sus partidas.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
-                <div className="section-panel" style={{ boxShadow: "none" }}>
-                  <div className="section-panel-header">
-                    <h3>Resumen de la venta seleccionada</h3>
-                    <span className="muted">{selectedSale ? selectedSale.folio : "Sin venta seleccionada"}</span>
+            <section className="section-panel" style={{ boxShadow: "none" }}>
+              <div className="section-panel-header">
+                <h3>Resumen de la venta seleccionada</h3>
+                <span className="muted">{selectedSale ? selectedSale.folio : "Sin venta seleccionada"}</span>
+              </div>
+              <div className="section-panel-body">
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div>
+                    <strong>Comprador:</strong> {selectedSaleBuyer ? partyLabel(selectedSaleBuyer) : "-"}
                   </div>
-                  <div className="section-panel-body">
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <div>
-                        <strong>Comprador:</strong> {selectedSaleBuyer ? partyLabel(selectedSaleBuyer) : "-"}
-                      </div>
-                      <div>
-                        <strong>Centro:</strong> {selectedSale ? centerLabel(centerById[selectedSale.collection_center]) : "-"}
-                      </div>
-                      <div>
-                        <strong>Total:</strong> {selectedSale ? money(selectedSale.total_amount) : "-"}
-                      </div>
-                      <div>
-                        <strong>Kg:</strong> {selectedSale ? kg(selectedSale.total_weight_kg) : "-"}
-                      </div>
-                      <div>
-                        <strong>Estado:</strong> {selectedSale?.status_label ?? selectedSale?.status ?? "-"}
-                      </div>
-                    </div>
+                  <div>
+                    <strong>Centro:</strong> {selectedSale ? centerLabel(centerById[selectedSale.collection_center]) : "-"}
+                  </div>
+                  <div>
+                    <strong>Total:</strong> {selectedSale ? money(selectedSale.total_amount) : "-"}
+                  </div>
+                  <div>
+                    <strong>Kg:</strong> {selectedSale ? kg(selectedSale.total_weight_kg) : "-"}
+                  </div>
+                  <div>
+                    <strong>Estado:</strong> {selectedSale?.status_label ?? selectedSale?.status ?? "-"}
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
           </div>
-        </section>
+        </div>
 
         <section className="section-panel">
           <div className="section-panel-header">
             <h3>Mapa y monitoreo de entrega</h3>
-            <span className="muted">Origen, destino, ubicacion actual y datos de recepcion</span>
+            <span className="muted">Origen, destino, ubicación actual y datos de recepción</span>
           </div>
           <div className="section-panel-body">
             <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.1fr)", gap: 16 }}>
               <div className="metric-panel" style={{ display: "grid", gap: 8 }}>
-                <span>Informacion de entrega</span>
+                <span>Información de entrega</span>
                 <div className="muted">Origen: {selectedSale ? centerLabel(centerById[selectedSale.collection_center]) : "-"}</div>
                 <div className="muted">Destino: {selectedRouteDestination ? centerLabel(selectedRouteDestination) : "-"}</div>
                 <div className="muted">Ruta: {selectedRoute ? routeLabel(selectedRoute) : "-"}</div>
@@ -518,10 +520,10 @@ export function LogisticsPage() {
                 <div className="muted">Hora de salida: {windowStart || "-"}</div>
                 <div className="muted">Hora de llegada: {windowEnd || "-"}</div>
                 <div className="muted">Quien recibe: {receiverName || "-"}</div>
-                <div className="muted">Telefono: {receiverPhone || "-"}</div>
+                <div className="muted">Teléfono: {receiverPhone || "-"}</div>
                 <div className="muted">Observaciones: {notes || "-"}</div>
                 <div className="muted">
-                  Ubicacion actual: {selectedVehicleGps ? `${selectedVehicleGps.lat}, ${selectedVehicleGps.lng} · ${formatDateTime(selectedVehicleGps.recorded_at)}` : "Sin senal GPS"}
+                  Ubicación actual: {selectedVehicleGps ? `${selectedVehicleGps.lat}, ${selectedVehicleGps.lng} · ${formatDateTime(selectedVehicleGps.recorded_at)}` : "Sin señal GPS"}
                 </div>
               </div>
               <RouteMap points={mapPoints} title="Mapa de entrega" />
@@ -531,27 +533,28 @@ export function LogisticsPage() {
 
         <section className="section-panel">
           <div className="section-panel-header">
-            <h3>Documentos de salida</h3>
-            <span className="muted">Orden de salida, remision y comprobante operativo</span>
+            <h3>Documentos y entregas recientes</h3>
+            <span className="muted">Orden de salida, remisión y comprobante operativo</span>
           </div>
-          <div className="section-panel-body">
-            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 16 }}>
+          <div className="section-panel-body" style={{ display: "grid", gap: 16 }}>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
               <div className="metric-panel">
                 <span>Orden de salida</span>
                 <strong>{selectedSale ? `OS-${selectedSale.folio}` : "-"}</strong>
                 <div className="muted">Autoriza la salida de material y unidad.</div>
               </div>
               <div className="metric-panel">
-                <span>Remision</span>
+                <span>Remisión</span>
                 <strong>{selectedSale ? `RM-${selectedSale.folio}` : "-"}</strong>
                 <div className="muted">Resume origen, destino, operador y carga.</div>
               </div>
               <div className="metric-panel">
                 <span>Comprobante</span>
-                <strong>{selectedSale ? "Disponible para impresion" : "-"}</strong>
+                <strong>{selectedSale ? "Disponible para impresión" : "-"}</strong>
                 <div className="muted">Usa la entrega para ticket o copia interna.</div>
               </div>
             </div>
+
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <button type="button" disabled={!selectedSale}>
                 Imprimir expediente
@@ -560,8 +563,40 @@ export function LogisticsPage() {
                 Preparar orden
               </button>
               <button type="button" disabled={!selectedSale}>
-                Preparar remision
+                Preparar remisión
               </button>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Folio</th>
+                    <th>Venta</th>
+                    <th>Ruta</th>
+                    <th>Unidad</th>
+                    <th>Fecha</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentDeliveries.map((delivery) => (
+                    <tr key={delivery.id}>
+                      <td style={{ fontFamily: "monospace", fontWeight: 700 }}>{delivery.folio}</td>
+                      <td>{delivery.sale_folio ?? delivery.sale_order}</td>
+                      <td>{delivery.route_name ?? delivery.route}</td>
+                      <td>{delivery.vehicle_label ?? delivery.vehicle}</td>
+                      <td>{formatDateTime(delivery.scheduled_date ?? delivery.created_at)}</td>
+                    </tr>
+                  ))}
+                  {!recentDeliveries.length ? (
+                    <tr>
+                      <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                        No hay entregas registradas todavía.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
           </div>
         </section>

@@ -12,6 +12,18 @@ type DailyReport = {
   volume_sold_kg: number;
   sale_revenue: number;
   inventory_current_kg: number;
+  raw_inventory_current_kg: number;
+  processed_inventory_current_kg: number;
+  processes_count: number;
+  process_input_kg: number;
+  process_output_kg: number;
+  process_waste_kg: number;
+  process_yield_pct: number;
+  sale_processed_kg: number;
+  sale_raw_kg: number;
+  sale_processed_amount: number;
+  sale_raw_amount: number;
+  purchase_vs_sales_kg_balance: number;
   purchases_vs_sales: {
     purchase_amount: number;
     sale_amount: number;
@@ -39,11 +51,26 @@ function fmtCurrency(n: number) {
   return "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function fmtPercent(n: number) {
+  return `${fmt(n, 1)}%`;
+}
+
+function ratio(part: number, total: number) {
+  if (!total || total <= 0) return 0;
+  return (part / total) * 100;
+}
+
+function localDateInputValue(date = new Date()) {
+  const offsetMinutes = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offsetMinutes * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
 export function DashboardPage() {
   const [report, setReport] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => localDateInputValue());
 
   const load = (date: string) => {
     setLoading(true);
@@ -60,9 +87,18 @@ export function DashboardPage() {
   }, [selectedDate]);
 
   const maxFamilyAmount = Math.max(...(report?.by_family.map((f) => f.amount) ?? [1]), 1);
-  const maxTrendAmount = Math.max(
-    ...(report?.trend_7d.flatMap((d) => [d.purchase_revenue, d.sale_revenue]) ?? [1]),
-    1,
+  const maxTrendAmount = Math.max(...(report?.trend_7d.flatMap((d) => [d.purchase_revenue, d.sale_revenue]) ?? [1]), 1);
+  const inventoryMixTotal = useMemo(
+    () => (report ? report.raw_inventory_current_kg + report.processed_inventory_current_kg : 0),
+    [report],
+  );
+  const salesMixTotal = useMemo(
+    () => (report ? report.sale_raw_amount + report.sale_processed_amount : 0),
+    [report],
+  );
+  const processVolumeTotal = useMemo(
+    () => (report ? report.process_input_kg + report.process_output_kg + report.process_waste_kg : 0),
+    [report],
   );
 
   const purchasesVsSalesLabel = useMemo(() => {
@@ -76,14 +112,14 @@ export function DashboardPage() {
         <div>
           <h2 style={{ margin: 0 }}>Resumen del día</h2>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: "0.82rem" }}>
-            Compras, ventas, inventario y volumen operativo del día seleccionado
+            Compras, ventas, procesamiento e inventario del día seleccionado
           </p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <input
             type="date"
             value={selectedDate}
-            max={new Date().toISOString().slice(0, 10)}
+            max={localDateInputValue()}
             onChange={(e) => setSelectedDate(e.target.value)}
             style={{ width: "auto" }}
           />
@@ -109,10 +145,94 @@ export function DashboardPage() {
           </div>
 
           <div className="kpi-grid" style={{ marginTop: 16 }}>
+            <KpiCard label="Procesos confirmados" value={`${fmt(report.processes_count, 0)}`} accent />
+            <KpiCard label="Entrada a proceso" value={`${fmt(report.process_input_kg, 1)} kg`} />
+            <KpiCard label="Salida procesada" value={`${fmt(report.process_output_kg, 1)} kg`} blue />
+            <KpiCard label="Merma de proceso" value={`${fmt(report.process_waste_kg, 1)} kg`} amber />
+          </div>
+
+          <div className="kpi-grid" style={{ marginTop: 16 }}>
+            <KpiCard label="Inventario crudo" value={`${fmt(report.raw_inventory_current_kg, 1)} kg`} accent />
+            <KpiCard label="Inventario procesado" value={`${fmt(report.processed_inventory_current_kg, 1)} kg`} blue />
+            <KpiCard label="Ventas crudas" value={fmtCurrency(report.sale_raw_amount)} />
+            <KpiCard label="Ventas procesadas" value={fmtCurrency(report.sale_processed_amount)} amber />
+          </div>
+
+          <div className="kpi-grid" style={{ marginTop: 16 }}>
             <KpiCard label="Compras del día" value={fmtCurrency(report.purchases_vs_sales.purchase_amount)} accent />
             <KpiCard label="Ventas del día" value={fmtCurrency(report.purchases_vs_sales.sale_amount)} blue />
             <KpiCard label="Saldo comercial" value={fmtCurrency(report.purchases_vs_sales.balance_amount)} amber />
-            <KpiCard label="Merma del día" value={`${fmt(report.total_merma_kg, 1)} kg`} />
+            <KpiCard label="Rendimiento" value={fmtPercent(report.process_yield_pct)} />
+          </div>
+
+          <div className="processing-two-up" style={{ marginTop: 16 }}>
+            <section className="section-panel">
+              <div className="section-panel-header">
+                <h3>Inventario por tipo</h3>
+              </div>
+              <div className="section-panel-body">
+                <div className="info-banner" style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  <strong>Distribución actual</strong>
+                  <span>El inventario se divide entre material crudo y material procesado listo para venta.</span>
+                </div>
+                <div className="bar-chart">
+                  <div className="bar-row">
+                    <span className="bar-label">Crudo</span>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: `${Math.max(4, ratio(report.raw_inventory_current_kg, inventoryMixTotal))}%` }}
+                      />
+                    </div>
+                    <span className="bar-amount">{fmt(report.raw_inventory_current_kg, 1)} kg</span>
+                  </div>
+                  <div className="bar-row">
+                    <span className="bar-label">Procesado</span>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: `${Math.max(4, ratio(report.processed_inventory_current_kg, inventoryMixTotal))}%` }}
+                      />
+                    </div>
+                    <span className="bar-amount">{fmt(report.processed_inventory_current_kg, 1)} kg</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="section-panel">
+              <div className="section-panel-header">
+                <h3>Ventas por tipo</h3>
+              </div>
+              <div className="section-panel-body">
+                <div className="info-banner" style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  <strong>Mix comercial</strong>
+                  <span>Permite ver qué tanto del ingreso viene de material crudo y cuánto de procesado.</span>
+                </div>
+                <div className="bar-chart">
+                  <div className="bar-row">
+                    <span className="bar-label">Crudo</span>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: `${Math.max(4, ratio(report.sale_raw_amount, salesMixTotal))}%` }}
+                      />
+                    </div>
+                    <span className="bar-amount">{fmtCurrency(report.sale_raw_amount)}</span>
+                  </div>
+                  <div className="bar-row">
+                    <span className="bar-label">Procesado</span>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: `${Math.max(4, ratio(report.sale_processed_amount, salesMixTotal))}%` }}
+                      />
+                    </div>
+                    <span className="bar-amount">{fmtCurrency(report.sale_processed_amount)}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
@@ -171,7 +291,7 @@ export function DashboardPage() {
                       const purchaseWidth = Math.max(4, (day.purchase_revenue / maxTrendAmount) * 100);
                       const saleWidth = Math.max(4, (day.sale_revenue / maxTrendAmount) * 100);
                       return (
-                        <div key={day.date} className="comparison-row" title={`${day.label}`}>
+                        <div key={day.date} className="comparison-row" title={day.label}>
                           <span className="comparison-day">{day.label}</span>
                           <div className="comparison-bars">
                             <div className="comparison-bar comparison-bar-purchase" style={{ width: `${purchaseWidth}%` }} />

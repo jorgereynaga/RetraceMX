@@ -19,10 +19,15 @@ function emptyForm() {
     code: "",
     name: "",
     family: "",
+    subfamily: "",
     unit: "kg" as Material["unit"],
     valuation_possible: true,
     is_hazard_auxiliary: false,
     requires_special_review: false,
+    is_buyable: true,
+    is_sellable: true,
+    is_processable: false,
+    is_processed: false,
     is_active: true,
     default_merma_pct: "",
   };
@@ -96,10 +101,15 @@ export function MaterialsPage() {
         code: selectedMaterial.code,
         name: selectedMaterial.name,
         family: selectedMaterial.family,
+        subfamily: selectedMaterial.subfamily ?? "",
         unit: selectedMaterial.unit,
         valuation_possible: selectedMaterial.valuation_possible,
         is_hazard_auxiliary: selectedMaterial.is_hazard_auxiliary,
         requires_special_review: selectedMaterial.requires_special_review,
+        is_buyable: selectedMaterial.is_buyable ?? true,
+        is_sellable: selectedMaterial.is_sellable ?? true,
+        is_processable: selectedMaterial.is_processable ?? false,
+        is_processed: selectedMaterial.is_processed ?? false,
         is_active: selectedMaterial.is_active,
         default_merma_pct: selectedMaterial.default_merma_pct ?? "",
       });
@@ -175,6 +185,10 @@ export function MaterialsPage() {
         valuation_possible: form.valuation_possible,
         is_hazard_auxiliary: form.is_hazard_auxiliary,
         requires_special_review: form.requires_special_review,
+        is_buyable: form.is_buyable,
+        is_sellable: form.is_sellable,
+        is_processable: form.is_processable,
+        is_processed: form.is_processed,
         is_active: form.is_active,
         default_merma_pct: form.default_merma_pct !== "" ? form.default_merma_pct : null,
       };
@@ -236,6 +250,10 @@ export function MaterialsPage() {
           <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="PET Claro" required />
         </label>
         <label>
+          Subfamilia
+          <input value={form.subfamily} onChange={(e) => updateField("subfamily", e.target.value)} placeholder="Limpio / Sucio / Compactado" />
+        </label>
+        <label>
           Familia
           <select value={form.family} onChange={(e) => updateField("family", e.target.value)} required>
             <option value="">Seleccionar</option>
@@ -273,6 +291,34 @@ export function MaterialsPage() {
           <div className="checkbox-field">
             <input type="checkbox" checked={form.requires_special_review} onChange={(e) => updateField("requires_special_review", e.target.checked)} />
             <span>{form.requires_special_review ? "Sí" : "No"}</span>
+          </div>
+        </label>
+        <label>
+          Comprable
+          <div className="checkbox-field">
+            <input type="checkbox" checked={form.is_buyable} onChange={(e) => updateField("is_buyable", e.target.checked)} />
+            <span>{form.is_buyable ? "Sí" : "No"}</span>
+          </div>
+        </label>
+        <label>
+          Vendible
+          <div className="checkbox-field">
+            <input type="checkbox" checked={form.is_sellable} onChange={(e) => updateField("is_sellable", e.target.checked)} />
+            <span>{form.is_sellable ? "Sí" : "No"}</span>
+          </div>
+        </label>
+        <label>
+          Procesable
+          <div className="checkbox-field">
+            <input type="checkbox" checked={form.is_processable} onChange={(e) => updateField("is_processable", e.target.checked)} />
+            <span>{form.is_processable ? "Sí" : "No"}</span>
+          </div>
+        </label>
+        <label>
+          Procesado
+          <div className="checkbox-field">
+            <input type="checkbox" checked={form.is_processed} onChange={(e) => updateField("is_processed", e.target.checked)} />
+            <span>{form.is_processed ? "Sí" : "No"}</span>
           </div>
         </label>
         <label>

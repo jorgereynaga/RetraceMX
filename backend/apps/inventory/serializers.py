@@ -9,6 +9,9 @@ from .models import InventoryMovement
 
 class InventoryMovementSerializer(serializers.ModelSerializer):
     material_name = serializers.SerializerMethodField()
+    material_is_processed = serializers.SerializerMethodField()
+    material_is_sellable = serializers.SerializerMethodField()
+    material_family_name = serializers.SerializerMethodField()
     collection_center_name = serializers.SerializerMethodField()
     movement_type_label = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
@@ -22,6 +25,17 @@ class InventoryMovementSerializer(serializers.ModelSerializer):
 
     def get_collection_center_name(self, obj):
         return obj.collection_center.name if obj.collection_center else None
+
+    def get_material_is_processed(self, obj):
+        return getattr(obj.material, "is_processed", None)
+
+    def get_material_is_sellable(self, obj):
+        return getattr(obj.material, "is_sellable", None)
+
+    def get_material_family_name(self, obj):
+        if obj.material and obj.material.family:
+            return obj.material.family.name
+        return None
 
     def get_movement_type_label(self, obj):
         return obj.get_movement_type_display()

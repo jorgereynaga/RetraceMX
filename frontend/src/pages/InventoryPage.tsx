@@ -53,6 +53,8 @@ export function InventoryPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<"all" | "raw" | "processed">("all");
+  const [centerFilter, setCenterFilter] = useState("");
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
 
   async function refresh() {
@@ -88,23 +90,34 @@ export function InventoryPage() {
   const balances = summary?.balances ?? [];
   const filteredBalances = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return balances;
-    return balances.filter((row) => (
-      row.collection_center_name.toLowerCase().includes(q)
-      || row.material_name.toLowerCase().includes(q)
-    ));
-  }, [balances, search]);
+    return balances.filter((row) => {
+      const matchesSearch = !q || row.collection_center_name.toLowerCase().includes(q) || row.material_name.toLowerCase().includes(q);
+      const matchesScope =
+        scopeFilter === "all"
+          || (scopeFilter === "raw" && !row.material_is_processed)
+          || (scopeFilter === "processed" && row.material_is_processed);
+      const matchesCenter = !centerFilter || row.collection_center_id === centerFilter;
+      return matchesSearch && matchesScope && matchesCenter;
+    });
+  }, [balances, centerFilter, scopeFilter, search]);
 
   const filteredMovements = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return movements;
-    return movements.filter((row) => (
-      (row.collection_center_name ?? "").toLowerCase().includes(q)
-      || (row.material_name ?? "").toLowerCase().includes(q)
-      || (row.notes ?? "").toLowerCase().includes(q)
-      || (row.movement_type_label ?? row.movement_type).toLowerCase().includes(q)
-    ));
-  }, [movements, search]);
+    return movements.filter((row) => {
+      const matchesSearch = !q
+        || (row.collection_center_name ?? "").toLowerCase().includes(q)
+        || (row.material_name ?? "").toLowerCase().includes(q)
+        || (row.lot_code ?? "").toLowerCase().includes(q)
+        || (row.notes ?? "").toLowerCase().includes(q)
+        || (row.movement_type_label ?? row.movement_type).toLowerCase().includes(q);
+      const matchesScope =
+        scopeFilter === "all"
+        || (scopeFilter === "raw" && !row.material_is_processed)
+        || (scopeFilter === "processed" && row.material_is_processed);
+      const matchesCenter = !centerFilter || row.collection_center === centerFilter;
+      return matchesSearch && matchesScope && matchesCenter;
+    });
+  }, [centerFilter, movements, scopeFilter, search]);
 
   const selectedCenter = centers.find((item) => item.id === form.collection_center) ?? null;
   const selectedMaterial = materials.find((item) => item.id === form.material) ?? null;
@@ -162,6 +175,17 @@ export function InventoryPage() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ width: 240 }}
           />
+          <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value as typeof scopeFilter)}>
+            <option value="all">Todo el inventario</option>
+            <option value="raw">Material crudo</option>
+            <option value="processed">Material procesado</option>
+          </select>
+          <select value={centerFilter} onChange={(e) => setCenterFilter(e.target.value)} style={{ minWidth: 220 }}>
+            <option value="">Todos los centros</option>
+            {centers.map((center) => (
+              <option key={center.id} value={center.id}>{center.name}</option>
+            ))}
+          </select>
           <button className="btn-secondary" onClick={refresh} disabled={loading}>
             {loading ? "Actualizando..." : "Actualizar"}
           </button>
@@ -318,15 +342,16 @@ export function InventoryPage() {
             <div style={{ overflowX: "auto" }}>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Centro</th>
-                    <th>Material</th>
-                    <th>Tipo</th>
-                    <th>Cantidad</th>
-                    <th>Importe</th>
-                    <th>Usuario</th>
-                    <th>Nota</th>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Centro</th>
+                      <th>Material</th>
+                      <th>Lote</th>
+                      <th>Tipo</th>
+                      <th>Cantidad</th>
+                      <th>Importe</th>
+                      <th>Usuario</th>
+                      <th>Nota</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -335,8 +360,9 @@ export function InventoryPage() {
                       <td>{formatDateTime(movement.occurred_at)}</td>
                       <td>{movement.collection_center_name ?? movement.collection_center}</td>
                       <td style={{ fontWeight: 600 }}>{movement.material_name ?? movement.material}</td>
+                      <td>{movement.lot_code ?? "—"}</td>
                       <td>
-                        <span className={`badge ${movement.movement_type === "outbound" ? "badge-amber" : movement.movement_type === "adjustment" ? "badge-blue" : "badge-green"}`}>
+                        <span className={`badge ${movement.movement_type === "outbound" || movement.movement_type.endsWith("_out") ? "badge-amber" : movement.movement_type.includes("adjustment") ? "badge-blue" : "badge-green"}`}>
                           {movement.movement_type_label ?? movement.movement_type}
                         </span>
                       </td>
