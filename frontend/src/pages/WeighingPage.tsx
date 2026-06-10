@@ -53,7 +53,7 @@ export function WeighingPage() {
     if (!silent) setLoadingRead(true);
     setReadError(null);
     try {
-      const r = await api.deviceSimulateScale(id);
+      const r = await api.deviceReadScale(id);
       setReading(r);
       setReadCount((c) => c + 1);
       return r;

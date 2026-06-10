@@ -4,10 +4,11 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.auditing.models import AuditLog
 from apps.devices.models import Device
-from apps.weighing.models import WeighingSession
+from apps.weighing.models import ScaleReading, WeighingSession
 from apps.commercialization.models import SaleOrder
 from apps.commercialization.services import add_sale_item, close_sale_order, register_sale_order
 from apps.evidence.services import register_print_event
@@ -25,8 +26,9 @@ from apps.operations.services import (
     register_ticket_item,
     update_ticket_item,
 )
-from apps.parties.models import CollectionCenter, PersonOrCompany
+from apps.parties.models import CollectionCenter, PersonOrCompany, Vehicle
 from apps.payments.services import register_payment
+from apps.weighing.views import ScaleReadingViewSet
 
 
 pytestmark = pytest.mark.django_db
@@ -473,3 +475,92 @@ def test_operation_with_no_sessions_changes_status_normally():
 
     operation.refresh_from_db()
     assert operation.status == PurchaseOperation.Status.CANCELLED
+
+
+def test_open_purchase_operation_reuses_bridge_weighing_session():
+    user = build_user("bridge-user")
+    center = CollectionCenter.objects.create(code="bridge-center", name="Centro Bridge")
+    customer = PersonOrCompany.objects.create(kind=PersonOrCompany.Kind.COMPANY, legal_name="Cliente Bridge SA")
+    vehicle = Vehicle.objects.create(plate_number="ABC-123", label="Camion Bridge")
+    device = Device.objects.create(
+        name="Bascula Bridge",
+        identifier="bridge-scale-001",
+        kind=Device.Kind.VEHICLE_SCALE,
+        collection_center=center,
+    )
+
+    bridge_session = WeighingSession.objects.create(
+        collection_center=center,
+        device=device,
+        vehicle=None,
+        operation=None,
+        kind=WeighingSession.Kind.VEHICLE,
+        metadata={"bridge_mode": True},
+    )
+
+    operation = open_purchase_operation(collection_center=center, customer=customer, opened_by=user, vehicle=vehicle)
+
+    bridge_session.refresh_from_db()
+    operation_session = WeighingSession.objects.get(operation=operation)
+
+    assert bridge_session.operation == operation
+    assert bridge_session.vehicle == vehicle
+    assert bridge_session.kind == WeighingSession.Kind.VEHICLE
+    assert operation_session.id == bridge_session.id
+
+
+def test_register_ticket_item_clears_purchase_weighing_draft():
+    user, center, customer, material, operation = build_context()
+    operation.metadata = {
+        "purchase_weighing_draft": {
+            "version": 1,
+            "method": "vehicle_differential",
+            "material_id": str(material.id),
+            "material_name": material.name,
+            "unit_price": "12.50000",
+            "merma_kg": "1.000",
+            "gross_kg": "100.000",
+            "manual_gross": "",
+            "manual_tare": "",
+            "diff_step": "cycling",
+            "diff_ref_kg": "100.000",
+            "captured_tare_kg": "5.000",
+        }
+    }
+    operation.save(update_fields=["metadata", "updated_at"])
+
+    register_ticket_item(
+        operation=operation,
+        material=material,
+        method=TicketItem.Method.SECONDARY_DIRECT,
+        unit_price=Decimal("12.50000"),
+        gross_weight_kg=Decimal("100.000"),
+        merma_kg=Decimal("1.000"),
+        user=user,
+    )
+
+    operation.refresh_from_db()
+    assert "purchase_weighing_draft" not in operation.metadata
+
+
+def test_scale_reading_list_can_filter_by_session():
+    user, center, customer, material, operation = build_context()
+    device = _build_scale_device(center)
+    session_a = _build_open_weighing_session(center, operation, device)
+    session_b = WeighingSession.objects.create(
+        collection_center=center,
+        device=device,
+        kind=WeighingSession.Kind.VEHICLE,
+    )
+
+    ScaleReading.objects.create(session=session_a, device=device, reading_type=ScaleReading.ReadingType.DIRECT, net_weight_kg=Decimal("100.000"), raw_value="100")
+    ScaleReading.objects.create(session=session_b, device=device, reading_type=ScaleReading.ReadingType.DIRECT, net_weight_kg=Decimal("200.000"), raw_value="200")
+
+    factory = APIRequestFactory()
+    request = factory.get(f"/api/scale-readings/?session={session_a.id}")
+    force_authenticate(request, user=user)
+    response = ScaleReadingViewSet.as_view({"get": "list"})(request)
+
+    assert response.status_code == 200
+    assert len(response.data["results"]) == 1
+    assert str(response.data["results"][0]["session"]) == str(session_a.id)

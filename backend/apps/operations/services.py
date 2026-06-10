@@ -16,6 +16,9 @@ from apps.weighing.models import WeighingSession
 from .models import PurchaseOperation, TicketItem
 
 
+PURCHASE_WEIGHING_DRAFT_KEY = "purchase_weighing_draft"
+
+
 def apply_tare_or_merma(weight_kg: Decimal, merma_kg: Decimal) -> Decimal:
     net_weight = Decimal(weight_kg) - Decimal(merma_kg)
     if net_weight < 0:
@@ -47,6 +50,37 @@ def calculate_operation_balance(operation: PurchaseOperation) -> tuple[Decimal, 
     return paid_amount, pending_amount
 
 
+def _operation_metadata(operation: PurchaseOperation) -> dict:
+    return dict(operation.metadata or {})
+
+
+def get_purchase_weighing_draft(operation: PurchaseOperation) -> dict | None:
+    draft = _operation_metadata(operation).get(PURCHASE_WEIGHING_DRAFT_KEY)
+    return draft if isinstance(draft, dict) else None
+
+
+@transaction.atomic
+def set_purchase_weighing_draft(operation: PurchaseOperation, draft: dict | None, user=None) -> PurchaseOperation:
+    metadata = _operation_metadata(operation)
+    if draft:
+        metadata[PURCHASE_WEIGHING_DRAFT_KEY] = draft
+    else:
+        metadata.pop(PURCHASE_WEIGHING_DRAFT_KEY, None)
+    operation.metadata = metadata
+    operation.save(update_fields=["metadata", "updated_at"])
+    register_audit_event(
+        actor=user,
+        action="update_purchase_weighing_draft" if draft else "clear_purchase_weighing_draft",
+        entity=operation,
+        details={"has_draft": bool(draft)},
+    )
+    return operation
+
+
+def clear_purchase_weighing_draft(operation: PurchaseOperation, user=None) -> PurchaseOperation:
+    return set_purchase_weighing_draft(operation, None, user=user)
+
+
 @transaction.atomic
 def open_purchase_operation(*, collection_center, customer, opened_by, route=None, vehicle=None, driver=None, source="purchase", notes="") -> PurchaseOperation:
     operation = PurchaseOperation.objects.create(
@@ -67,13 +101,25 @@ def open_purchase_operation(*, collection_center, customer, opened_by, route=Non
             kind=Device.Kind.VEHICLE_SCALE,
         ).first()
         if scale_device:
-            WeighingSession.objects.create(
+            session = WeighingSession.objects.filter(
                 collection_center=collection_center,
-                operation=operation,
                 device=scale_device,
-                vehicle=vehicle,
-                kind=WeighingSession.Kind.VEHICLE,
-            )
+                status=WeighingSession.Status.OPEN,
+                operation__isnull=True,
+            ).order_by("-started_at").first()
+            if session:
+                session.operation = operation
+                session.vehicle = vehicle
+                session.kind = WeighingSession.Kind.VEHICLE
+                session.save(update_fields=["operation", "vehicle", "kind", "updated_at"])
+            else:
+                WeighingSession.objects.create(
+                    collection_center=collection_center,
+                    operation=operation,
+                    device=scale_device,
+                    vehicle=vehicle,
+                    kind=WeighingSession.Kind.VEHICLE,
+                )
     register_audit_event(actor=opened_by, action="open_purchase_operation", entity=operation, details={"source": source})
     return operation
 
@@ -193,6 +239,7 @@ def register_ticket_item(*, operation: PurchaseOperation, material, method: str,
     )
     calculate_ticket_item_amount(item)
     recalculate_operation_total(operation)
+    clear_purchase_weighing_draft(operation, user=user)
     register_audit_event(actor=user, action="confirm_ticket_item", entity=item, details={"method": method, "net_weight_kg": str(net_weight_kg)})
     return item
 

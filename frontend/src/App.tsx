@@ -21,6 +21,7 @@ import { LogisticsPage } from "./pages/LogisticsPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { SalesHistoryPage } from "./pages/SalesHistoryPage";
 import { UsersPage } from "./pages/UsersPage";
+import { DevicesPage } from "./pages/DevicesPage";
 
 export function App() {
   const { token } = useAuth();
@@ -51,6 +52,7 @@ export function App() {
         <Route path="/logistics" element={<LogisticsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/sales-history" element={<SalesHistoryPage />} />
+        <Route path="/devices" element={<DevicesPage />} />
         <Route path="/users" element={<UsersPage />} />
       </Route>
     </Routes>

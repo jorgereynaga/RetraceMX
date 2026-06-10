@@ -331,7 +331,7 @@ class Command(BaseCommand):
                 "is_stable": True,
                 "is_manual_fallback": False,
                 "collection_center": center,
-                "metadata": {"min_weight": 100, "max_weight": 30000, "model": "Revuelta RV-50T"},
+                "metadata": {"adapter": "simulated", "min_weight": 100, "max_weight": 30000, "model": "Revuelta RV-50T"},
             },
         )
         Device.objects.get_or_create(
@@ -344,7 +344,7 @@ class Command(BaseCommand):
                 "is_stable": True,
                 "is_manual_fallback": False,
                 "collection_center": center,
-                "metadata": {"min_weight": 0.1, "max_weight": 500, "model": "Ohaus D51XW"},
+                "metadata": {"adapter": "simulated", "min_weight": 0.1, "max_weight": 500, "model": "Ohaus D51XW"},
             },
         )
         Device.objects.get_or_create(

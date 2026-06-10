@@ -22,6 +22,8 @@ ALLOWED_HOSTS = [
     ).split(",")
     if host.strip()
 ]
+if DEBUG and "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
 TIME_ZONE = os.getenv("DJANGO_TIME_ZONE", "America/Mexico_City")
 USE_TZ = True
 LANGUAGE_CODE = "es-mx"
@@ -37,6 +39,11 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 def _database_config():
+    if os.getenv("DJANGO_USE_SQLITE", "0") == "1":
+        return {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         return {

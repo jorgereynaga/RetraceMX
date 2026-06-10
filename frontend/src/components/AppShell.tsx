@@ -44,6 +44,10 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    label: "Configuracion",
+    items: [{ to: "/devices", label: "Dispositivos", icon: "DV" }],
+  },
+  {
     label: "Control",
     items: [
       { to: "/history", label: "Historial de compras", icon: "HI" },

@@ -105,16 +105,14 @@ El diseño funcional considera como base la LGPGIR y, para residuos de manejo es
 
 ## Cómo correr el proyecto en local
 
-### Con Docker
+La vía recomendada en Windows es sin Docker:
 
-```bash
-docker compose up --build
-```
+1. PostgreSQL instalado y corriendo en `localhost:5432`
+2. Backend en Python/venv
+3. Frontend en Vite
+4. Báscula conectada al puerto `COM3` real del host
 
-- Frontend: `http://localhost:5000`
-- API: `http://localhost:8001`
-
-### Backend sin Docker
+### Backend local
 
 ```bash
 cd backend
@@ -124,6 +122,33 @@ pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver
 ```
+
+En Windows, si quieres que el backend vea la bascula real por `COM3`, usa el arranque local que apunta a PostgreSQL en `localhost:5432`:
+
+```powershell
+.\scripts\run-backend-local.ps1
+```
+
+Tambien puedes hacer doble clic en:
+
+```text
+scripts\run-backend-local.cmd
+```
+
+Ese arranque usa el backend fuera de Docker y se conecta a PostgreSQL en `localhost:5432`.
+Deja el puerto serial en manos de Windows, que es justo lo que necesitamos para probar la bascula real.
+
+Para la interfaz que debe hablar con ese backend local, abre el frontend local en:
+
+```text
+scripts\run-frontend-local.cmd
+```
+
+Eso levanta Vite en `http://localhost:5173` y lo apunta a `http://localhost:8000`, que es donde corre el backend Windows capaz de leer `COM3`.
+
+### Docker
+
+Docker sigue disponible para despliegue o pruebas aisladas, pero ya no es el camino recomendado para operar la báscula real en Windows.
 
 ### Frontend sin Docker
 
@@ -174,6 +199,22 @@ La integración física está desacoplada del frontend. La base incluye:
 - simulación de báscula secundaria USB,
 - simulación de impresora térmica Epson POS,
 - interfaces para adaptadores reales por puerto serie o middleware local.
+
+### Puente de báscula en Windows
+
+Si el backend corre en Docker y la báscula está conectada al host Windows por `COM5` o similar, usa el puente local:
+
+```powershell
+.\scripts\scale_bridge.cmd -BackendUrl http://localhost:8001 -Username admin -Password Admin1234! -DeviceIdentifier STD-21X3-COM5 -DeviceName "Bascula STD-21X3" -Port COM5
+```
+
+Para una sola lectura:
+
+```powershell
+.\scripts\scale_bridge.cmd -BackendUrl http://localhost:8001 -Username admin -Password Admin1234! -DeviceIdentifier STD-21X3-COM5 -DeviceName "Bascula STD-21X3" -Port COM5 -Once
+```
+
+El puente lee el puerto serie en Windows y publica las lecturas al backend por API, así que Docker no necesita abrir el COM directamente.
 
 Consulta:
 

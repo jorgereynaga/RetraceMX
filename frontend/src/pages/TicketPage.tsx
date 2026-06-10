@@ -136,6 +136,7 @@ export function TicketPage() {
     };
   }, [devices, method, selectedOperation]);
   const selectedDeviceId = selectedDeviceInfo?.id ?? "";
+  const activeSessionId = selectedOperation?.active_weighing_session ?? "";
 
   async function refreshPricingForMaterial(collectionCenterId: string, nextMaterialId: string) {
     const lookupId = ++priceLookupRef.current;
@@ -213,7 +214,7 @@ export function TicketPage() {
 
   useEffect(() => {
     const deviceId = selectedDeviceId;
-    if (!deviceId) {
+    if (!deviceId || !activeSessionId) {
       setLiveScale(null);
       return;
     }
@@ -222,10 +223,24 @@ export function TicketPage() {
 
     async function poll() {
       try {
-        const reading = await api.deviceSimulateScale(deviceId);
+        const readings = await api.scaleReadingsBySession(activeSessionId);
+        const latest = readings[0];
         if (active) {
-          setLiveScale(reading);
-          setScaleTrail((current) => [...current.slice(-4), reading.weight_kg]);
+          if (latest) {
+            setLiveScale({
+              device_id: String(latest.device),
+              device_name: selectedDeviceInfo?.label ?? "Báscula",
+              kind: selectedDeviceInfo?.label ?? "scale",
+              raw_value: latest.raw_value ?? "",
+              weight_kg: latest.net_weight_kg ?? latest.gross_weight_kg ?? "0",
+              is_stable: latest.is_stable ?? true,
+              is_manual_fallback: false,
+              captured_at: latest.captured_at ?? new Date().toISOString(),
+            });
+            setScaleTrail((current) => [...current.slice(-4), latest.net_weight_kg ?? latest.gross_weight_kg ?? "0"]);
+          } else {
+            setLiveScale(null);
+          }
         }
       } catch {
         if (active) {
@@ -240,7 +255,7 @@ export function TicketPage() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [selectedDeviceId]);
+  }, [selectedDeviceId, activeSessionId, selectedDeviceInfo?.label]);
 
   function useLiveReadingAsGross() {
     if (!liveScale) return;

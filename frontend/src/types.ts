@@ -69,6 +69,7 @@ export type Device = {
   is_connected: boolean;
   is_stable: boolean;
   is_manual_fallback: boolean;
+  metadata?: Record<string, unknown>;
   collection_center?: string | null;
   vehicle?: string | null;
   last_seen_at?: string | null;
@@ -157,6 +158,7 @@ export type PurchaseOperation = {
   customer_name?: string;
   customer_trade_name?: string | null;
   customer_legal_name?: string;
+  metadata?: Record<string, unknown>;
   vehicle?: string | null;
   driver?: string | null;
   vehicle_plate?: string | null;

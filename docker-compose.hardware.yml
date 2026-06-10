@@ -1,0 +1,5 @@
+services:
+  backend:
+    devices:
+      - ${SCALE_USB_DEVICE:-/dev/ttyUSB0}:${SCALE_USB_DEVICE:-/dev/ttyUSB0}
+      - ${PRINTER_USB_DEVICE:-/dev/ttyUSB1}:${PRINTER_USB_DEVICE:-/dev/ttyUSB1}

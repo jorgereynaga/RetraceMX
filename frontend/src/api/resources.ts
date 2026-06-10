@@ -94,6 +94,7 @@ export const api = {
   partyPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Party>(`/parties/${id}/`, payload),
   partyDelete: (id: string) => apiDelete<void>(`/parties/${id}/`),
   parties: () => apiList<Party>("/parties/"),
+  partiesAll: () => apiListAll<Party>("/parties/"),
   materials: () => apiListAll<Material>("/materials/"),
   materialsAll: () => apiListAll<Material>("/materials/"),
   vehicles: () => apiList<Vehicle>("/vehicles/"),
@@ -102,12 +103,20 @@ export const api = {
   vehicleDelete: (id: string) => apiDelete<void>(`/vehicles/${id}/`),
   deleteTicketItem: (id: string) => apiDelete<void>(`/ticket-items/${id}/`),
   drivers: () => apiList<Driver>("/drivers/"),
-  devices: () => apiList<Device>("/devices/"),
+  devices: () => apiListAll<Device>("/devices/"),
+  devicePatch: (id: string, payload: Record<string, unknown>) => apiPatch<Device>(`/devices/${id}/`, payload),
+  deviceReadScale: (deviceId: string) =>
+    apiPost<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; port: string; captured_at: string }>(`/devices/${deviceId}/read_scale/`, {}),
+  deviceProbeScale: (deviceId: string, payload: Record<string, unknown> = {}) =>
+    apiPost<{ device_id: string; device_name: string; kind: string; port: string; captured_at: string; line_count: number; lines: Array<{ text: string; hex: string }> }>(`/devices/${deviceId}/probe_scale/`, payload),
+  deviceSimulatePrint: (deviceId: string, payload: Record<string, unknown> = {}) =>
+    apiPost<{ device_id: string; device_name: string; kind: string; printer_name: string; printer_identifier: string; printer_port: string; status: string; copies: number; is_reprint: boolean; payload: Record<string, unknown> }>(`/devices/${deviceId}/simulate_print/`, payload),
   routes: () => apiList<Route>("/routes/"),
   operations: () => apiList<PurchaseOperation>("/purchase-operations/"),
   operationsAll: () => apiListAll<PurchaseOperation>("/purchase-operations/"),
   operationDetail: (id: string) => apiGet<PurchaseOperation>(`/purchase-operations/${id}/`),
   operationCreate: (payload: Record<string, unknown>) => apiPost<PurchaseOperation>("/purchase-operations/open/", payload),
+  operationPatch: (id: string, payload: Record<string, unknown>) => apiPatch<PurchaseOperation>(`/purchase-operations/${id}/`, payload),
   operationStatusChange: (id: string, status: string, reason = "", extra: Record<string, unknown> = {}) =>
     apiPost<PurchaseOperation>(`/purchase-operations/${id}/status_change/`, { status, reason, ...extra }),
   operationUpdateDriver: (id: string, driverId: string | null) =>
@@ -197,7 +206,8 @@ export const api = {
     apiGet<PriceSuggestion>(
       `/price-suggestion/?collection_center_id=${encodeURIComponent(collectionCenterId)}&material_id=${encodeURIComponent(materialId)}${partyId ? `&party_id=${encodeURIComponent(partyId)}` : ""}`,
     ),
-  deviceSimulateScale: (deviceId: string) => apiGet<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; captured_at: string }>(`/devices/${deviceId}/simulate_scale/`),
+  deviceSimulateScale: (deviceId: string) =>
+    apiGet<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; port: string; captured_at: string }>(`/devices/${deviceId}/simulate_scale/`),
   weighingSessionsByVehicle: (vehicleId: string, params?: { dateFrom?: string; dateTo?: string }) => {
     const query = new URLSearchParams({ vehicle: vehicleId });
     if (params?.dateFrom) query.set("date_from", params.dateFrom);
@@ -205,6 +215,7 @@ export const api = {
     return apiListAll<WeighingSession>(`/weighing-sessions/?${query.toString()}`);
   },
   createScaleReading: (payload: Record<string, unknown>) => apiPost<ScaleReading>("/scale-readings/", payload),
+  scaleReadingsBySession: (sessionId: string) => apiListAll<ScaleReading>(`/scale-readings/?session=${encodeURIComponent(sessionId)}`),
   evidenceFiles: () => apiList<EvidenceFile>("/evidence-files/"),
   evidenceFileUpload: (formData: FormData) => apiPostFormData<EvidenceFile>("/evidence-files/", formData),
   reportBasic: () => apiGet<Record<string, unknown>>("/reports/basic/"),

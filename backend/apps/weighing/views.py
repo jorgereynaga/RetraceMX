@@ -36,6 +36,16 @@ class ScaleReadingViewSet(viewsets.ModelViewSet):
     queryset = ScaleReading.objects.select_related("session", "device").all().order_by("-captured_at")
     serializer_class = ScaleReadingSerializer
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        session_id = self.request.query_params.get("session")
+        device_id = self.request.query_params.get("device")
+        if session_id:
+            queryset = queryset.filter(session_id=session_id)
+        if device_id:
+            queryset = queryset.filter(device_id=device_id)
+        return queryset
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)

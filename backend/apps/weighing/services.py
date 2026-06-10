@@ -35,6 +35,35 @@ def register_scale_reading(*, session: WeighingSession, device, reading_type: st
     return reading
 
 
+def get_or_create_bridge_session(*, device, captured_at=None):
+    from apps.parties.models import CollectionCenter
+
+    if device.collection_center_id:
+        collection_center = device.collection_center
+    else:
+        collection_center = CollectionCenter.objects.order_by("name").first()
+    if not collection_center:
+        raise ValidationError("El dispositivo no tiene centro de recoleccion y no existe uno por defecto para crear la sesion.")
+
+    session = (
+        WeighingSession.objects.filter(device=device, status=WeighingSession.Status.OPEN, manual_entry=False)
+        .order_by("-started_at")
+        .first()
+    )
+    if session:
+        return session
+
+    return WeighingSession.objects.create(
+        collection_center=collection_center,
+        device=device,
+        kind=WeighingSession.Kind.VEHICLE if device.kind == "vehicle_scale" else WeighingSession.Kind.SECONDARY,
+        status=WeighingSession.Status.OPEN,
+        manual_entry=False,
+        notes="Bridge scale session",
+        metadata={"bridge_mode": True, "bridge_device": device.identifier},
+    )
+
+
 def register_individual_weight(*, operation, material, unit_price, net_weight_kg, merma_kg=0, method=None, scale_session=None, reading=None, created_by=None, notes=""):
     from apps.auditing.services import register_audit_event
     from apps.operations.models import TicketItem

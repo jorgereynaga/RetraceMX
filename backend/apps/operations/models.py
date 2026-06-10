@@ -47,6 +47,7 @@ class PurchaseOperation(UUIDTimeStampedModel):
     print_status = models.CharField(max_length=20, choices=PrintStatus.choices, default=PrintStatus.PENDING)
     source = models.CharField(max_length=60, default="purchase")
     notes = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
     total_weight_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     total_merma_kg = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))

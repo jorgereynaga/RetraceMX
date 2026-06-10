@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
 import { TicketViewer } from "../components/TicketViewer";
-import type { CollectionCenter, Device, Driver, Material, MaterialFamily, Party, PriceList, PriceListItem, PriceSuggestion, PurchaseOperation, TicketItem, Vehicle, WeighingSession } from "../types";
+import type { CollectionCenter, Device, Driver, Material, MaterialFamily, Party, PriceList, PriceListItem, PriceSuggestion, PurchaseOperation, ScaleReading, TicketItem, Vehicle, WeighingSession } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { userCan } from "../utils/permissions";
 
@@ -12,6 +12,71 @@ type LiveReading = {
   raw_value: string;
   captured_at: string;
 };
+
+type WeighingDraft = {
+  version: 1;
+  method: string;
+  material_id: string;
+  material_name: string;
+  unit_price: string;
+  merma_kg: string;
+  gross_kg: string;
+  manual_gross: string;
+  manual_tare: string;
+  diff_step: "idle" | "gross" | "cycling";
+  diff_ref_kg: string;
+  captured_tare_kg: string;
+};
+
+const PURCHASE_WEIGHING_DRAFT_KEY = "purchase_weighing_draft";
+
+function readWeighingDraft(operation: PurchaseOperation | null): WeighingDraft | null {
+  const metadata = operation?.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const draft = (metadata as Record<string, unknown>)[PURCHASE_WEIGHING_DRAFT_KEY];
+  if (!draft || typeof draft !== "object") return null;
+  const raw = draft as Partial<WeighingDraft> & Record<string, unknown>;
+  if (raw.version !== 1) return null;
+  return {
+    version: 1,
+    method: typeof raw.method === "string" ? raw.method : "vehicle_differential",
+    material_id: typeof raw.material_id === "string" ? raw.material_id : "",
+    material_name: typeof raw.material_name === "string" ? raw.material_name : "",
+    unit_price: typeof raw.unit_price === "string" ? raw.unit_price : "0",
+    merma_kg: typeof raw.merma_kg === "string" ? raw.merma_kg : "",
+    gross_kg: typeof raw.gross_kg === "string" ? raw.gross_kg : "",
+    manual_gross: typeof raw.manual_gross === "string" ? raw.manual_gross : "",
+    manual_tare: typeof raw.manual_tare === "string" ? raw.manual_tare : "",
+    diff_step: raw.diff_step === "gross" || raw.diff_step === "cycling" ? raw.diff_step : "idle",
+    diff_ref_kg: typeof raw.diff_ref_kg === "string" ? raw.diff_ref_kg : "",
+    captured_tare_kg: typeof raw.captured_tare_kg === "string" ? raw.captured_tare_kg : "",
+  };
+}
+
+function draftHasContent(draft: WeighingDraft) {
+  return Boolean(
+    draft.material_id ||
+      draft.material_name ||
+      draft.unit_price !== "0" ||
+      draft.merma_kg ||
+      draft.gross_kg ||
+      draft.manual_gross ||
+      draft.manual_tare ||
+      draft.diff_ref_kg ||
+      draft.captured_tare_kg ||
+      draft.diff_step !== "idle",
+  );
+}
+
+function readingToLiveReading(reading: ScaleReading): LiveReading {
+  const weight_kg = reading.net_weight_kg ?? reading.gross_weight_kg ?? reading.tare_weight_kg ?? "0";
+  return {
+    weight_kg,
+    is_stable: reading.is_stable ?? true,
+    raw_value: reading.raw_value ?? "",
+    captured_at: reading.captured_at ?? new Date().toISOString(),
+  };
+}
 
 const POLL_MS = 1800;
 const MERMA_PCT = 0.03;
@@ -51,6 +116,11 @@ export function PurchasePage() {
 
   const [centerId, setCenterId] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  const [customerCreateKind, setCustomerCreateKind] = useState<Party["kind"]>("company");
+  const [customerCreateLoading, setCustomerCreateLoading] = useState(false);
+  const [customerCreateError, setCustomerCreateError] = useState<string | null>(null);
 
   const [plateInput, setPlateInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -79,6 +149,10 @@ export function PurchasePage() {
   const [liveReading, setLiveReading] = useState<LiveReading | null>(null);
   const [autoRead, setAutoRead] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftHydratingRef = useRef(false);
+  const suppressPriceAutoFillRef = useRef(false);
+  const operationRef = useRef<PurchaseOperation | null>(null);
 
   const [items, setItems] = useState<TicketItem[]>([]);
   const [itemLoading, setItemLoading] = useState(false);
@@ -109,10 +183,12 @@ export function PurchasePage() {
   const HISTORY_PAGE_SIZE = 10;
   const [vehicleHistoryAll, setVehicleHistoryAll] = useState<WeighingSession[]>([]);
 
+  operationRef.current = operation;
+
   useEffect(() => {
     Promise.all([
       api.centers().then(setCenters),
-      api.parties().then(setParties),
+      api.partiesAll().then(setParties),
       api.materials().then(setMaterials),
       api.priceLists().then(setPriceLists),
       api.priceListItems().then(setPriceListItems),
@@ -180,23 +256,60 @@ export function PurchasePage() {
     );
   }, [devices, method, centerId]);
 
+  const activeSessionId = operation?.active_weighing_session ?? null;
+
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (!autoRead || !scaleDevice) return;
+    let cancelled = false;
     const poll = async () => {
-      try { setLiveReading(await api.deviceSimulateScale(scaleDevice.id)); } catch { }
+      try {
+        const latest = activeSessionId
+          ? (await api.scaleReadingsBySession(activeSessionId))[0]
+          : await api.deviceReadScale(scaleDevice.id);
+        if (!cancelled) {
+          if (latest) {
+            setLiveReading(
+              "session" in latest
+                ? readingToLiveReading(latest)
+                : {
+                    weight_kg: latest.weight_kg,
+                    is_stable: latest.is_stable,
+                    raw_value: latest.raw_value,
+                    captured_at: latest.captured_at,
+                  },
+            );
+          } else {
+            setLiveReading(null);
+          }
+        }
+      } catch {
+        if (!cancelled) setLiveReading(null);
+      }
     };
     poll();
     pollRef.current = setInterval(poll, POLL_MS);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [autoRead, scaleDevice?.id]);
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [autoRead, activeSessionId, scaleDevice?.id]);
 
   const priceLookupSeq = useRef(0);
   useEffect(() => {
     if (!centerId || !materialId) { setPriceSuggestion(null); return; }
     const seq = ++priceLookupSeq.current;
     api.priceSuggestion(centerId, materialId, customerId || undefined)
-      .then((s) => { if (seq !== priceLookupSeq.current) return; setPriceSuggestion(s); setUnitPrice(s.unit_price ?? "0"); })
+      .then((s) => {
+        if (seq !== priceLookupSeq.current) return;
+        setPriceSuggestion(s);
+        const savedDraft = readWeighingDraft(operationRef.current);
+        if (suppressPriceAutoFillRef.current || (savedDraft?.material_id === materialId && savedDraft.unit_price)) {
+          suppressPriceAutoFillRef.current = false;
+          return;
+        }
+        setUnitPrice(s.unit_price ?? "0");
+      })
       .catch(() => { if (seq !== priceLookupSeq.current) return; setPriceSuggestion(null); });
   }, [centerId, customerId, materialId]);
 
@@ -215,6 +328,29 @@ export function PurchasePage() {
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
   const vehicleById = useMemo(() => new Map(allVehicles.map((v) => [v.id, v])), [allVehicles]);
   const partyById = useMemo(() => new Map(parties.map((p) => [p.id, p])), [parties]);
+  const selectedCustomer = useMemo(() => partyById.get(customerId) ?? null, [customerId, partyById]);
+  const customerSearchResults = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    const items = parties.filter((party) => {
+      if (!q) return true;
+      return [
+        party.trade_name,
+        party.legal_name,
+        party.tax_id,
+        party.phone,
+        party.email,
+      ].some((value) => value?.toLowerCase().includes(q));
+    });
+    return items.slice(0, 8);
+  }, [customerQuery, parties]);
+  const customerExactMatch = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    if (!q) return null;
+    return parties.find((party) => (
+      party.trade_name?.trim().toLowerCase() === q
+      || party.legal_name.trim().toLowerCase() === q
+    )) ?? null;
+  }, [customerQuery, parties]);
   const activeCustomerPriceList = useMemo(() => {
     if (!centerId || !customerId) return null;
     const today = new Date().toISOString().slice(0, 10);
@@ -278,13 +414,45 @@ export function PurchasePage() {
         ? `Default del material: ${(parseFloat(selectedMaterial.default_merma_pct) * 100).toFixed(1)}%`
         : `Default global: ${(MERMA_PCT * 100).toFixed(0)}%`)
     : null;
+  useEffect(() => {
+    if (!operation) return;
+    if (draftHydratingRef.current) {
+      draftHydratingRef.current = false;
+      return;
+    }
+    if (draftSyncRef.current) clearTimeout(draftSyncRef.current);
+    const draft = buildWeighingDraft();
+    if (!draftHasContent(draft)) return;
+    draftSyncRef.current = setTimeout(() => {
+      void persistWeighingDraft(draft);
+    }, 450);
+    return () => {
+      if (draftSyncRef.current) {
+        clearTimeout(draftSyncRef.current);
+        draftSyncRef.current = null;
+      }
+    };
+  }, [
+    operation?.id,
+    selectedMaterial?.name,
+    method,
+    materialId,
+    unitPrice,
+    mermaKg,
+    grossKg,
+    manualGross,
+    manualTare,
+    diffStep,
+    diffRefKg,
+    capturedTareKg,
+  ]);
   const mermaNum = mermaKg !== "" && !isNaN(parseFloat(mermaKg)) ? parseFloat(mermaKg) : netRaw * effectiveMermaPct;
   const netClean = Math.max(0, netRaw - mermaNum);
   const priceNum = parseFloat(unitPrice) || 0;
   const estimatedAmount = netClean * priceNum;
 
   const hasScale = !!scaleDevice;
-  const canReadScale = !!operation && hasScale && method !== "manual_contingency";
+  const canReadScale = !!operation && !!activeSessionId && method !== "manual_contingency";
   const canCaptureGross = canReadScale && diffStep === "idle" && liveStable && !confirmed;
   const canCaptureTare = canReadScale && diffStep === "cycling" && !!materialId && liveStable && !capturedTareKg && !confirmed;
   const canAddItemDiff = !!operation && diffStep === "cycling" && !!materialId && !!capturedTareKg && netClean > 0 && !confirmed;
@@ -295,12 +463,74 @@ export function PurchasePage() {
   const canCancelOperation = !!operation && operation.payment_status === "pending" && !confirmed;
   const isCancelledOperation = operation?.status === "cancelled";
 
+  function buildWeighingDraft(): WeighingDraft {
+    const selected = materialId ? materialById.get(materialId) : undefined;
+    return {
+      version: 1,
+      method,
+      material_id: materialId,
+      material_name: selected?.name ?? "",
+      unit_price: unitPrice,
+      merma_kg: mermaKg,
+      gross_kg: grossKg,
+      manual_gross: manualGross,
+      manual_tare: manualTare,
+      diff_step: diffStep,
+      diff_ref_kg: diffRefKg,
+      captured_tare_kg: capturedTareKg,
+    };
+  }
+
+  async function persistWeighingDraft(nextDraft: WeighingDraft | null) {
+    const currentOperation = operationRef.current;
+    if (!currentOperation) return;
+    const metadata = { ...(currentOperation.metadata ?? {}) } as Record<string, unknown>;
+    if (nextDraft && draftHasContent(nextDraft)) {
+      metadata[PURCHASE_WEIGHING_DRAFT_KEY] = nextDraft;
+    } else {
+      delete metadata[PURCHASE_WEIGHING_DRAFT_KEY];
+    }
+    try {
+      const updated = await api.operationPatch(currentOperation.id, { metadata });
+      setOperation(updated);
+      setTodayOps((prev) => prev.map((op) => (op.id === updated.id ? updated : op)));
+      setAllOperations((prev) => prev.map((op) => (op.id === updated.id ? updated : op)));
+    } catch {
+      // Keep the local flow usable even if draft persistence fails momentarily.
+    }
+  }
+
+  function applyWeighingDraft(draft: WeighingDraft | null) {
+    draftHydratingRef.current = true;
+    if (!draft) {
+      suppressPriceAutoFillRef.current = false;
+      resetWeigh();
+      setMethod("vehicle_differential");
+      setMaterialId("");
+      setUnitPrice("0");
+      return;
+    }
+    suppressPriceAutoFillRef.current = true;
+    setMethod(draft.method || "vehicle_differential");
+    setMaterialId(draft.material_id || "");
+    setUnitPrice(draft.unit_price || "0");
+    setMermaKg(draft.merma_kg || "");
+    setGrossKg(draft.gross_kg || "");
+    setManualGross(draft.manual_gross || "");
+    setManualTare(draft.manual_tare || "");
+    setDiffStep(draft.diff_step || "idle");
+    setDiffRefKg(draft.diff_ref_kg || "");
+    setCapturedTareKg(draft.captured_tare_kg || "");
+    setItemMsg("Se recuperó el borrador del pesaje para continuar.");
+  }
+
   function captureGross() {
     if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable."); return; }
     setDiffRefKg(liveReading.weight_kg);
     setCapturedTareKg("");
     setDiffStep("cycling");
     setItemMsg(`Peso inicial capturado: ${fmtKg(parseFloat(liveReading.weight_kg))} kg. Selecciona el material y captura la tara.`);
+    void persistWeighingDraft({ ...buildWeighingDraft(), diff_ref_kg: liveReading.weight_kg, captured_tare_kg: "" });
   }
 
   function captureTare() {
@@ -313,12 +543,54 @@ export function PurchasePage() {
     }
     setCapturedTareKg(liveReading.weight_kg);
     setItemMsg(null);
+    void persistWeighingDraft({ ...buildWeighingDraft(), captured_tare_kg: liveReading.weight_kg });
   }
 
   function captureDirectReading() {
     if (!liveReading || !liveStable) { setItemMsg("Espera lectura estable."); return; }
     setGrossKg(liveReading.weight_kg);
     setItemMsg(null);
+    void persistWeighingDraft({ ...buildWeighingDraft(), gross_kg: liveReading.weight_kg });
+  }
+
+  async function startScaleReading() {
+    if (!operation) {
+      setItemMsg("Abre una compra antes de iniciar la lectura.");
+      return;
+    }
+    if (!scaleDevice) {
+      setItemMsg("No hay báscula configurada para esta compra.");
+      return;
+    }
+    setAutoRead(true);
+    setItemMsg("Lectura iniciada. Espera un peso estable.");
+  }
+
+  function registerCurrentReading() {
+    if (!liveReading) {
+      setItemMsg("Primero inicia la lectura para obtener un peso.");
+      return;
+    }
+    if (!liveStable) {
+      setItemMsg("Espera a que la lectura se estabilice antes de registrarla.");
+      return;
+    }
+    if (method === "vehicle_differential") {
+      if (diffStep === "idle") {
+        captureGross();
+        return;
+      }
+      if (diffStep === "cycling" && !capturedTareKg) {
+        captureTare();
+        return;
+      }
+      if (diffStep === "cycling" && capturedTareKg) {
+        setItemMsg("La tara ya quedó capturada. Puedes agregar la partida.");
+        return;
+      }
+    }
+    captureDirectReading();
+    setItemMsg("Lectura registrada en la compra.");
   }
 
   async function resolveVehicleId(): Promise<string | null> {
@@ -378,12 +650,49 @@ export function PurchasePage() {
       setItems([]);
       setConfirmed(false);
       setPrintMsg(null);
-      resetWeigh();
+      applyWeighingDraft(readWeighingDraft(op));
       loadTodayOps();
     } catch (e) {
       setOpError(e instanceof Error ? e.message : "Error al crear la operación o el vehículo.");
     } finally {
       setOpLoading(false);
+    }
+  }
+
+  async function createCustomerFromSearch() {
+    const name = customerQuery.trim();
+    if (!name) {
+      setCustomerCreateError("Escribe el nombre del cliente.");
+      return;
+    }
+    if (!canManagePurchases) {
+      setCustomerCreateError("No tienes permiso para crear clientes.");
+      return;
+    }
+    setCustomerCreateLoading(true);
+    setCustomerCreateError(null);
+    try {
+      const created = await api.partyCreate({
+        kind: customerCreateKind,
+        legal_name: name,
+        trade_name: name,
+        tax_id: "",
+        email: "",
+        phone: "",
+        address: "",
+        notes: "",
+        is_active: true,
+        commercial_roles: [],
+      });
+      setParties((current) => [...current, created]);
+      setCustomerId(created.id);
+      setCustomerQuery(created.trade_name || created.legal_name);
+      setShowCustomerSuggestions(false);
+      setCustomerCreateError(null);
+    } catch (error) {
+      setCustomerCreateError(error instanceof Error ? error.message : "No se pudo crear el cliente.");
+    } finally {
+      setCustomerCreateLoading(false);
     }
   }
 
@@ -394,7 +703,18 @@ export function PurchasePage() {
   }
 
   function resetForNextMaterial() {
-    setMaterialId(""); setMermaKg(""); setCapturedTareKg("");
+    draftHydratingRef.current = true;
+    suppressPriceAutoFillRef.current = false;
+    resetWeigh();
+    setMaterialId("");
+    setUnitPrice("0");
+    setMermaKg("");
+    setGrossKg("");
+    setManualGross("");
+    setManualTare("");
+    setDiffRefKg("");
+    setCapturedTareKg("");
+    setDiffStep("idle");
     setItemMsg("Partida registrada. Selecciona el siguiente material y captura la tara.");
   }
 
@@ -446,7 +766,7 @@ export function PurchasePage() {
       setItems((prev) => [...prev, item]);
       const refreshed = await api.operationDetail(operation.id);
       setOperation(refreshed);
-      setDiffRefKg(capturedTareKg);
+      await persistWeighingDraft(null);
       resetForNextMaterial();
     } catch (e) {
       setItemMsg(e instanceof Error ? e.message : "Error al guardar la partida.");
@@ -480,7 +800,8 @@ export function PurchasePage() {
       setItems((prev) => [...prev, item]);
       const refreshed = await api.operationDetail(operation.id);
       setOperation(refreshed);
-      resetWeigh();
+      await persistWeighingDraft(null);
+      resetForNextMaterial();
       setItemMsg("Partida registrada correctamente.");
     } catch (e) {
       setItemMsg(e instanceof Error ? e.message : "Error al guardar la partida.");
@@ -631,10 +952,13 @@ export function PurchasePage() {
     setConfirmed(op.status === "confirmed" || op.status === "completed" || op.status === "cancelled" || op.payment_status === "paid");
     setPrintMsg(null);
     setEditState(null);
-    resetWeigh();
-    setMaterialId(""); setFamilyFilter("");
+    applyWeighingDraft(readWeighingDraft(op));
+    setFamilyFilter("");
     setCenterId(op.collection_center);
     setCustomerId(op.customer);
+    setCustomerQuery(op.customer_name ?? op.customer_trade_name ?? op.customer_legal_name ?? partyById.get(op.customer)?.trade_name ?? partyById.get(op.customer)?.legal_name ?? "");
+    setShowCustomerSuggestions(false);
+    setCustomerCreateError(null);
     setDriverId(op.driver ?? "");
     setDriverInput(op.driver_name ?? drivers.find((d) => d.id === op.driver)?.person_name ?? "");
     setShowDriverSuggestions(false);
@@ -649,11 +973,12 @@ export function PurchasePage() {
   function startNew() {
     setOperation(null); setItems([]);
     setConfirmed(false); setPrintMsg(null);
-    setCustomerId(""); setPlateInput(""); setCustomerVehicles([]);
+    setCustomerId(""); setCustomerQuery(""); setShowCustomerSuggestions(false);
+    setCustomerCreateError(null); setPlateInput(""); setCustomerVehicles([]);
     setDriverId("");
     setDriverInput(""); setShowDriverSuggestions(false);
-    resetWeigh();
-    setMaterialId(""); setFamilyFilter("");
+    applyWeighingDraft(null);
+    setFamilyFilter("");
     setEditState(null);
     setEditingDriver(false); setEditDriverId(""); setDriverUpdateError(null);
     loadTodayOps();
@@ -915,17 +1240,142 @@ export function PurchasePage() {
                   <div><span className="badge badge-blue">🏭 {center.name}</span></div>
               )}
 
-              <label>
+              <label style={{ position: "relative" }}>
                 Cliente / Proveedor <span style={{ color: "var(--danger)" }}>*</span>
-                <select
-                  value={customerId}
-                    onChange={(e) => { setCustomerId(e.target.value); setPlateInput(""); setDriverId(""); setDriverInput(""); setShowDriverSuggestions(false); }}
+                <input
+                  type="text"
+                  value={customerQuery}
+                  placeholder={
+                    selectedCustomer
+                      ? "Buscar otro cliente o crear uno nuevo"
+                      : "Busca por nombre, RFC, teléfono o escribe uno nuevo"
+                  }
                   disabled={!!operation}
+                  onChange={(e) => {
+                    setCustomerQuery(e.target.value);
+                    setCustomerId("");
+                    setShowCustomerSuggestions(true);
+                    setCustomerCreateError(null);
+                    setPlateInput("");
+                    setDriverId("");
+                    setDriverInput("");
+                    setShowDriverSuggestions(false);
+                  }}
+                  onFocus={() => setShowCustomerSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowCustomerSuggestions(false), 150)}
+                  autoComplete="off"
                   style={{ borderColor: !customerId ? "rgba(239,68,68,0.5)" : undefined }}
-                >
-                  <option value="">— Seleccionar cliente —</option>
-                  {parties.map((p) => <option key={p.id} value={p.id}>{p.trade_name || p.legal_name}</option>)}
-                </select>
+                />
+                {selectedCustomer && !operation && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: "0.72rem", color: "var(--muted)" }}>
+                    <span>
+                      Seleccionado: <strong style={{ color: "var(--text)" }}>{selectedCustomer.trade_name || selectedCustomer.legal_name}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ fontSize: "0.7rem", padding: "2px 8px" }}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setCustomerId("");
+                        setCustomerQuery("");
+                        setShowCustomerSuggestions(true);
+                      }}
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                )}
+                {showCustomerSuggestions && !operation && (
+                  <div style={{
+                    position: "absolute",
+                    zIndex: 20,
+                    left: 0,
+                    right: 0,
+                    top: "100%",
+                    background: "var(--panel)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                    maxHeight: 280,
+                    overflowY: "auto",
+                  }}>
+                    <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: "0.72rem", color: "var(--muted)" }}>
+                      Busca un cliente existente o crea uno nuevo sin salir de la compra.
+                    </div>
+                    {customerSearchResults.map((party) => {
+                      const label = party.trade_name || party.legal_name;
+                      return (
+                        <div
+                          key={party.id}
+                          style={{ padding: "8px 12px", cursor: "pointer", fontSize: "0.85rem" }}
+                          onMouseDown={() => {
+                            setCustomerId(party.id);
+                            setCustomerQuery(label);
+                            setShowCustomerSuggestions(false);
+                            setCustomerCreateError(null);
+                            setPlateInput("");
+                            setDriverId("");
+                            setDriverInput("");
+                            setShowDriverSuggestions(false);
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                        >
+                          <div style={{ fontWeight: 600 }}>{label}</div>
+                          <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+                            {party.kind === "company" ? "Empresa" : "Persona"}
+                            {party.tax_id ? ` · RFC/ID ${party.tax_id}` : ""}
+                            {party.phone ? ` · ${party.phone}` : ""}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {customerSearchResults.length === 0 && customerQuery.trim() && (
+                      <div style={{ padding: "10px 12px", fontSize: "0.82rem", color: "var(--muted)" }}>
+                        No hay coincidencias.
+                      </div>
+                    )}
+                    {!customerExactMatch && customerQuery.trim() && (
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid var(--border)", display: "grid", gap: 8 }}>
+                        <div style={{ fontSize: "0.76rem", color: "var(--muted)" }}>
+                          No existe un cliente con ese nombre. Podemos crearlo en este momento.
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <label style={{ margin: 0, fontSize: "0.76rem", display: "flex", alignItems: "center", gap: 6 }}>
+                            Tipo
+                            <select
+                              value={customerCreateKind}
+                              onChange={(e) => setCustomerCreateKind(e.target.value as Party["kind"])}
+                              style={{ minWidth: 120 }}
+                            >
+                              <option value="company">Empresa</option>
+                              <option value="person">Persona</option>
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ fontSize: "0.78rem", padding: "4px 10px" }}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={createCustomerFromSearch}
+                            disabled={!canManagePurchases || customerCreateLoading}
+                          >
+                            {customerCreateLoading ? "Creando..." : `Crear "${customerQuery.trim()}"`}
+                          </button>
+                        </div>
+                        <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+                          Se guardará con ese nombre y quedará seleccionada para seguir la compra.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {customerCreateError && (
+                  <div style={{ fontSize: "0.75rem", color: "var(--danger)", marginTop: 4 }}>
+                    {customerCreateError}
+                  </div>
+                )}
               </label>
 
               {/* Plate input with customer-scoped autocomplete */}
@@ -1387,67 +1837,84 @@ export function PurchasePage() {
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                    {!hasScale ? (
-                      <div className="info-banner" style={{ flex: 1, fontSize: "0.8rem" }}>Sin báscula configurada.</div>
-                    ) : (
-                      <>
-                        <button
-                          className={autoRead ? "btn-danger" : "btn-secondary"}
-                          style={{ flex: 1 }}
-                          onClick={() => setAutoRead((v) => !v)}
-                          disabled={!canManagePurchases}
-                        >
-                          {autoRead ? "⏸ Pausar báscula" : "▶ Leer báscula"}
-                        </button>
+                  {!hasScale ? (
+                    <div className="info-banner" style={{ marginTop: 10, fontSize: "0.8rem" }}>Sin báscula configurada.</div>
+                  ) : !scaleDevice ? (
+                    <div className="info-banner" style={{ marginTop: 10, fontSize: "0.8rem" }}>
+                      No hay báscula configurada para esta compra.
+                    </div>
+                  ) : null}
 
-                        {method === "vehicle_differential" && diffStep === "idle" && (
-                          <button
-                            className="btn-primary"
-                            style={{ flex: 1 }}
-                            disabled={!canManagePurchases || !canCaptureGross}
-                            onClick={captureGross}
-                            title="Captura el peso inicial (vehículo cargado). No necesitas seleccionar material todavía."
-                          >
-                            ⬇ Capturar peso inicial
-                          </button>
-                        )}
+                  <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                    <button
+                      className={autoRead ? "btn-danger" : "btn-secondary"}
+                      style={{ flex: 1 }}
+                      onClick={() => {
+                        if (autoRead) {
+                          setAutoRead(false);
+                          return;
+                        }
+                        void startScaleReading();
+                      }}
+                      disabled={!canManagePurchases}
+                    >
+                      {autoRead ? "⏸ Pausar lectura" : "▶ Iniciar lectura"}
+                    </button>
 
-                        {method === "vehicle_differential" && diffStep === "cycling" && !capturedTareKg && (
-                          <button
-                            className="btn-primary"
-                            style={{ flex: 1 }}
-                            disabled={!canManagePurchases || !canCaptureTare}
-                            onClick={captureTare}
-                            title="Captura la tara cuando el vehículo haya descargado el material"
-                          >
-                            ⬇ Capturar tara
-                          </button>
-                        )}
-                        {method === "vehicle_differential" && diffStep === "cycling" && capturedTareKg && (
-                        <button
-                          className="btn-primary"
-                          style={{ flex: 1 }}
-                          type="button"
-                          disabled={!canManagePurchases || !canAddItemDiff || itemLoading}
-                          onClick={addItemDiff}
-                        >
-                            {itemLoading ? "Guardando..." : "+ Agregar partida"}
-                          </button>
-                        )}
+                    <button
+                      className="btn-primary"
+                      style={{ flex: 1 }}
+                      onClick={registerCurrentReading}
+                      disabled={!canManagePurchases || !liveReading}
+                    >
+                      ● Registrar lectura
+                    </button>
 
-                        {method === "secondary_direct" && (
-                          <button
-                            className="btn-primary"
-                            style={{ flex: 1 }}
-                            type="button"
-                            disabled={!canManagePurchases || (!canCaptureDirect && !!materialId)}
-                            onClick={captureDirectReading}
-                          >
-                            ✓ Capturar lectura
-                          </button>
-                        )}
-                      </>
+                    {method === "vehicle_differential" && diffStep === "idle" && (
+                      <button
+                        className="btn-primary"
+                        style={{ flex: 1 }}
+                        disabled={!canManagePurchases || !canCaptureGross}
+                        onClick={captureGross}
+                        title="Captura el peso inicial (vehículo cargado). No necesitas seleccionar material todavía."
+                      >
+                        ⬇ Capturar peso inicial
+                      </button>
+                    )}
+
+                    {method === "vehicle_differential" && diffStep === "cycling" && !capturedTareKg && (
+                      <button
+                        className="btn-primary"
+                        style={{ flex: 1 }}
+                        disabled={!canManagePurchases || !canCaptureTare}
+                        onClick={captureTare}
+                        title="Captura la tara cuando el vehículo haya descargado el material"
+                      >
+                        ⬇ Capturar tara
+                      </button>
+                    )}
+                    {method === "vehicle_differential" && diffStep === "cycling" && capturedTareKg && (
+                      <button
+                        className="btn-primary"
+                        style={{ flex: 1 }}
+                        type="button"
+                        disabled={!canManagePurchases || !canAddItemDiff || itemLoading}
+                        onClick={addItemDiff}
+                      >
+                        {itemLoading ? "Guardando..." : "+ Agregar partida"}
+                      </button>
+                    )}
+
+                    {method === "secondary_direct" && (
+                      <button
+                        className="btn-primary"
+                        style={{ flex: 1 }}
+                        type="button"
+                        disabled={!canManagePurchases || (!canCaptureDirect && !!materialId)}
+                        onClick={captureDirectReading}
+                      >
+                        ✓ Capturar lectura
+                      </button>
                     )}
                   </div>
                 </div>

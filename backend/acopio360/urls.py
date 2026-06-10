@@ -68,7 +68,7 @@ router.register("custody-events", CustodyEventViewSet)
 router.register("audit-logs", AuditLogViewSet)
 
 urlpatterns = [
-    path("", lambda request: redirect(os.getenv("FRONTEND_URL", "http://localhost:5000/"), permanent=False)),
+    path("", lambda request: redirect(os.getenv("DJANGO_ROOT_REDIRECT_URL", os.getenv("FRONTEND_URL", "http://localhost:5000/")), permanent=False)),
     path("admin/", admin.site.urls),
     path("api/auth/login/", LoginView.as_view(), name="auth-login"),
     path("api/reports/basic/", BasicReportView.as_view(), name="basic-report"),

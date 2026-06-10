@@ -42,11 +42,13 @@ class SimulatedScaleAdapter:
 class SimulatedThermalPrinter:
     identifier: str
     name: str = "Epson TM-T20"
+    port: str = ""
 
     def print_ticket(self, payload: dict) -> dict:
         return {
             "printer_identifier": self.identifier,
             "printer_name": self.name,
+            "printer_port": self.port,
             "status": "printed",
             "copies": payload.get("copies", 1),
             "is_reprint": payload.get("is_reprint", False),
