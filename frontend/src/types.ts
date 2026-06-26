@@ -110,6 +110,22 @@ export type PriceListItem = {
   is_active: boolean;
 };
 
+export type PriceListBaseGenerationResponse = {
+  price_list: PriceList;
+  summary: {
+    processed: number;
+    created: number;
+    updated: number;
+    omitted: number;
+    missing_materials_count: number;
+  };
+  missing_materials: Array<{
+    code: string;
+    name: string;
+  }>;
+  price_list_created: boolean;
+};
+
 export type Party = {
   id: string;
   kind: "person" | "company";

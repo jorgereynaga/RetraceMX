@@ -49,6 +49,55 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+function parseFilename(contentDisposition: string | null) {
+  if (!contentDisposition) return null;
+  const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(contentDisposition);
+  const encoded = match?.[1];
+  const plain = match?.[2];
+  const raw = encoded || plain;
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw.replace(/"/g, ""));
+  } catch {
+    return raw.replace(/"/g, "");
+  }
+}
+
+async function requestDownload(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (!isFormData) {
+    headers.set("Content-Type", "application/json");
+  }
+  const token = getAuthToken();
+  if (token) {
+    headers.set("Authorization", `Token ${token}`);
+  }
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const message = await response.text();
+    let friendlyMessage: string | null = null;
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed && typeof parsed === "object") {
+        const detail = (parsed as { detail?: unknown }).detail;
+        if (typeof detail === "string" && detail.trim()) {
+          friendlyMessage = detail;
+        }
+      }
+    } catch {
+      // Fallback to raw text below.
+    }
+    throw new Error(friendlyMessage || message || "Request failed");
+  }
+  const blob = await response.blob();
+  return {
+    blob,
+    contentType: response.headers.get("content-type") ?? blob.type,
+    filename: parseFilename(response.headers.get("content-disposition")),
+  };
+}
+
 async function requestList<T>(path: string): Promise<T[]> {
   const payload = await request<T[] | { results?: T[] }>(path);
   if (Array.isArray(payload)) {
@@ -127,4 +176,8 @@ export function apiPostFormData<T>(path: string, body: FormData) {
     body,
     headers: {},
   });
+}
+
+export function apiDownload(path: string) {
+  return requestDownload(path);
 }

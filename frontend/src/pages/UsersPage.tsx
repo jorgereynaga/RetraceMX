@@ -1,11 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Page } from "../components/Page";
+import { CatalogImportExportButton } from "../components/CatalogImportExportButton";
 import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
 import { api } from "../api/resources";
 import type { Role, User } from "../types";
 import { matchesSearch, paginate, sortByValue } from "../utils/listing";
 import { getRolePermissionMatrix } from "../utils/permissions";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 type SortKey = "username" | "name" | "email" | "phone" | "roles" | "status";
 
@@ -23,6 +26,8 @@ function emptyForm() {
 }
 
 export function UsersPage() {
+  const { user } = useAuth();
+  const canUseCatalogTools = userCan(user, "catalog.export");
   const [items, setItems] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
@@ -175,6 +180,12 @@ export function UsersPage() {
 
   return (
     <Page title="Usuarios" actions={<span className="muted">Alta, edición y roles mínimos del sistema</span>}>
+      {canUseCatalogTools ? (
+        <div className="page-actions">
+          <CatalogImportExportButton catalog="users" search={search} selectedIds={selectedUserId ? [selectedUserId] : []} />
+          <CatalogImportExportButton catalog="roles" />
+        </div>
+      ) : null}
       {message ? <div className={message.toLowerCase().includes("no") ? "error-banner" : "info-banner"} style={{ marginBottom: 16 }}>{message}</div> : null}
 
       <section className="metric-panel" style={{ marginBottom: 16 }}>

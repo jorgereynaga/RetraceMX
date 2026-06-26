@@ -1,9 +1,10 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+﻿import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import type { Material, MaterialFamily } from "../types";
 import { Page } from "../components/Page";
 import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
+import { CatalogImportExportButton } from "../components/CatalogImportExportButton";
 import { paginate, sortByValue } from "../utils/listing";
 import { useAuth } from "../context/AuthContext";
 import { userCan } from "../utils/permissions";
@@ -38,9 +39,11 @@ type SortKey = "code" | "name" | "family" | "unit" | "valuation" | "review" | "a
 export function MaterialsPage() {
   const { user } = useAuth();
   const canManageMaterials = userCan(user, "materials.manage");
+  const canUseCatalogTools = userCan(user, "catalog.export");
   const [items, setItems] = useState<Material[]>([]);
   const [families, setFamilies] = useState<MaterialFamily[]>([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [isMaterialModalOpen, setIsMaterialModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -96,6 +99,7 @@ export function MaterialsPage() {
   }, [page, pageSize, selectedMaterialId, sortedItems]);
 
   useEffect(() => {
+    if (!isMaterialModalOpen) return;
     if (selectedMaterial) {
       setForm({
         code: selectedMaterial.code,
@@ -116,7 +120,7 @@ export function MaterialsPage() {
     } else {
       setForm(emptyForm());
     }
-  }, [selectedMaterial]);
+  }, [isMaterialModalOpen, selectedMaterial]);
 
   useEffect(() => {
     setPage(1);
@@ -133,6 +137,24 @@ export function MaterialsPage() {
     }
     setSortKey(nextKey);
     setSortDirection("asc");
+  }
+
+  function openCreateMaterialModal() {
+    setSelectedMaterialId("");
+    setIsMaterialModalOpen(true);
+    setMessage(null);
+  }
+
+  function openEditMaterialModal(item: Material) {
+    setSelectedMaterialId(item.id);
+    setIsMaterialModalOpen(true);
+    setMessage(null);
+  }
+
+  function closeMaterialModal() {
+    setIsMaterialModalOpen(false);
+    setSelectedMaterialId("");
+    setForm(emptyForm());
   }
 
   function startMermaEdit(item: Material, event: MouseEvent) {
@@ -200,28 +222,27 @@ export function MaterialsPage() {
         setMessage("Material creado.");
         setSelectedMaterialId(created.id);
       }
-      setForm(emptyForm());
+      closeMaterialModal();
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo guardar el material");
     }
   }
 
-  async function removeMaterial() {
-    if (!selectedMaterial) return;
+  async function removeMaterial(item: Material | null = selectedMaterial) {
+    if (!item) return;
     if (!canManageMaterials) {
       setMessage("No tienes permiso para eliminar materiales.");
       return;
     }
-    if (!window.confirm(`Seguro que deseas eliminar el material ${selectedMaterial.code} · ${selectedMaterial.name}? Esta accion no se puede deshacer.`)) {
+    if (!window.confirm(`Seguro que deseas eliminar el material ${item.code} · ${item.name}? Esta acción no se puede deshacer.`)) {
       return;
     }
     setMessage(null);
     try {
-      await api.materialDelete(selectedMaterial.id);
+      await api.materialDelete(item.id);
       setMessage("Material eliminado.");
-      setSelectedMaterialId("");
-      setForm(emptyForm());
+      closeMaterialModal();
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo eliminar el material");
@@ -230,129 +251,28 @@ export function MaterialsPage() {
 
   return (
     <Page title="Materiales" actions={<span className="muted">Catálogo maestro de residuos y valorizables</span>}>
+      {canUseCatalogTools ? (
+        <div className="page-actions">
+          {canManageMaterials ? (
+            <button type="button" className="btn-primary" onClick={openCreateMaterialModal}>
+              Nuevo material
+            </button>
+          ) : null}
+          <CatalogImportExportButton catalog="materials" selectedIds={selectedMaterialId ? [selectedMaterialId] : []} search={search} />
+          <CatalogImportExportButton catalog="material-families" />
+        </div>
+      ) : null}
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
-      <section className="metric-panel" style={{ marginBottom: 16 }}>
-        <span>Catálogo maestro</span>
-        <strong>{items.length}</strong>
-        <div className="muted" style={{ marginTop: 6 }}>
-          Clasificación operativa, unidad, valorización y revisión especial por material.
-        </div>
-      </section>
-
-      <form className="inline-form materials-form" onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
-        <label>
-          Código
-          <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="pet-claro" required />
-        </label>
-        <label>
-          Nombre
-          <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="PET Claro" required />
-        </label>
-        <label>
-          Subfamilia
-          <input value={form.subfamily} onChange={(e) => updateField("subfamily", e.target.value)} placeholder="Limpio / Sucio / Compactado" />
-        </label>
-        <label>
-          Familia
-          <select value={form.family} onChange={(e) => updateField("family", e.target.value)} required>
-            <option value="">Seleccionar</option>
-            {families.map((family) => (
-              <option key={family.id} value={family.id}>
-                {family.code} · {family.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Unidad
-          <select value={form.unit} onChange={(e) => updateField("unit", e.target.value as Material["unit"])}>
-            <option value="kg">Kilogramo</option>
-            <option value="ton">Tonelada</option>
-            <option value="piece">Pieza</option>
-          </select>
-        </label>
-        <label>
-          Valorizable
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.valuation_possible} onChange={(e) => updateField("valuation_possible", e.target.checked)} />
-            <span>{form.valuation_possible ? "Sí" : "No"}</span>
+      <div className="catalog-top-row" style={{ marginBottom: 16 }}>
+        <section className="metric-panel">
+          <span>Total de registros</span>
+          <strong>{items.length}</strong>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Clasificación operativa, unidad, valorización y revisión especial por material.
           </div>
-        </label>
-        <label>
-          Peligrosidad auxiliar
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_hazard_auxiliary} onChange={(e) => updateField("is_hazard_auxiliary", e.target.checked)} />
-            <span>{form.is_hazard_auxiliary ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Revisión especial
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.requires_special_review} onChange={(e) => updateField("requires_special_review", e.target.checked)} />
-            <span>{form.requires_special_review ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Comprable
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_buyable} onChange={(e) => updateField("is_buyable", e.target.checked)} />
-            <span>{form.is_buyable ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Vendible
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_sellable} onChange={(e) => updateField("is_sellable", e.target.checked)} />
-            <span>{form.is_sellable ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Procesable
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_processable} onChange={(e) => updateField("is_processable", e.target.checked)} />
-            <span>{form.is_processable ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Procesado
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_processed} onChange={(e) => updateField("is_processed", e.target.checked)} />
-            <span>{form.is_processed ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Activo
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
-            <span>{form.is_active ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <label>
-          Merma por defecto
-          <input
-            type="number"
-            value={form.default_merma_pct}
-            onChange={(e) => updateField("default_merma_pct", e.target.value)}
-            placeholder="ej. 0.03 (3%)"
-            min={0}
-            max={1}
-            step={0.0001}
-          />
-        </label>
-        <button type="submit" disabled={!canManageMaterials}>{selectedMaterial ? "Actualizar" : "Crear"} material</button>
-        <button type="button" className="ghost-button" onClick={() => { setSelectedMaterialId(""); setForm(emptyForm()); }}>
-          Limpiar
-        </button>
-        {selectedMaterial ? (
-          <button type="button" className="ghost-button" onClick={removeMaterial} disabled={!canManageMaterials}>
-            Eliminar
-          </button>
-        ) : null}
-      </form>
-
-      <div className="metric-panel" style={{ marginBottom: 12 }}>
-        <label className="search-box">
+        </section>
+        <label className="search-box metric-panel">
           Búsqueda rápida
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por código, nombre o familia" />
         </label>
@@ -369,6 +289,7 @@ export function MaterialsPage() {
             <th><SortableHeader label="Revisión" active={sortKey === "review"} direction={sortDirection} onClick={() => toggleSort("review")} /></th>
             <th><SortableHeader label="Activo" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
             <th title="Clic en la celda para editar">Merma % ✎</th>
+            <th>Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -400,15 +321,44 @@ export function MaterialsPage() {
                     onBlur={() => commitMermaEdit(item)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") commitMermaEdit(item);
-                      if (e.key === "Escape") { setEditingMermaId(null); setEditingMermaValue(""); }
+                      if (e.key === "Escape") {
+                        setEditingMermaId(null);
+                        setEditingMermaValue("");
+                      }
                     }}
                     onClick={(e) => e.stopPropagation()}
                   />
+                ) : item.default_merma_pct != null ? (
+                  `${(parseFloat(item.default_merma_pct) * 100).toFixed(2)}%`
                 ) : (
-                  item.default_merma_pct != null
-                    ? `${(parseFloat(item.default_merma_pct) * 100).toFixed(2)}%`
-                    : <span className="muted">— (global)</span>
+                  <span className="muted">— (global)</span>
                 )}
+              </td>
+              <td>
+                <div className="table-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary table-action-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openEditMaterialModal(item);
+                    }}
+                    disabled={!canManageMaterials}
+                  >
+                    Modificar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-danger table-action-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void removeMaterial(item);
+                    }}
+                    disabled={!canManageMaterials}
+                  >
+                    Eliminar
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -416,6 +366,142 @@ export function MaterialsPage() {
       </table>
 
       <Pagination {...paginatedItems} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
+
+      {isMaterialModalOpen ? (
+        <div className="catalog-dialog-backdrop" role="presentation" onClick={closeMaterialModal}>
+          <div
+            className="catalog-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedMaterial ? "Editar material" : "Nuevo material"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="catalog-dialog-header">
+              <div>
+                <strong>{selectedMaterial ? "Editar material" : "Nuevo material"}</strong>
+                <div className="muted">Catálogo maestro de materiales</div>
+              </div>
+              <button type="button" className="ghost-button" onClick={closeMaterialModal}>
+                Cerrar
+              </button>
+            </div>
+            <form className="inline-form materials-form" onSubmit={handleSubmit}>
+              <label>
+                Código
+                <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="pet-claro" required />
+              </label>
+              <label>
+                Nombre
+                <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="PET Claro" required />
+              </label>
+              <label>
+                Subfamilia
+                <input value={form.subfamily} onChange={(e) => updateField("subfamily", e.target.value)} placeholder="Limpio / Sucio / Compactado" />
+              </label>
+              <label>
+                Familia
+                <select value={form.family} onChange={(e) => updateField("family", e.target.value)} required>
+                  <option value="">Seleccionar</option>
+                  {families.map((family) => (
+                    <option key={family.id} value={family.id}>
+                      {family.code} · {family.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Unidad
+                <select value={form.unit} onChange={(e) => updateField("unit", e.target.value as Material["unit"])}>
+                  <option value="kg">Kilogramo</option>
+                  <option value="ton">Tonelada</option>
+                  <option value="piece">Pieza</option>
+                </select>
+              </label>
+              <label>
+                Valorizable
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.valuation_possible} onChange={(e) => updateField("valuation_possible", e.target.checked)} />
+                  <span>{form.valuation_possible ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Peligrosidad auxiliar
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_hazard_auxiliary} onChange={(e) => updateField("is_hazard_auxiliary", e.target.checked)} />
+                  <span>{form.is_hazard_auxiliary ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Revisión especial
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.requires_special_review} onChange={(e) => updateField("requires_special_review", e.target.checked)} />
+                  <span>{form.requires_special_review ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Comprable
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_buyable} onChange={(e) => updateField("is_buyable", e.target.checked)} />
+                  <span>{form.is_buyable ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Vendible
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_sellable} onChange={(e) => updateField("is_sellable", e.target.checked)} />
+                  <span>{form.is_sellable ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Procesable
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_processable} onChange={(e) => updateField("is_processable", e.target.checked)} />
+                  <span>{form.is_processable ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Procesado
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_processed} onChange={(e) => updateField("is_processed", e.target.checked)} />
+                  <span>{form.is_processed ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Activo
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
+                  <span>{form.is_active ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <label>
+                Merma por defecto
+                <input
+                  type="number"
+                  value={form.default_merma_pct}
+                  onChange={(e) => updateField("default_merma_pct", e.target.value)}
+                  placeholder="ej. 0.03 (3%)"
+                  min={0}
+                  max={1}
+                  step={0.0001}
+                />
+              </label>
+              <div className="full-width-form-field" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="submit" className="btn-primary" disabled={!canManageMaterials}>
+                  {selectedMaterial ? "Actualizar" : "Crear"} material
+                </button>
+                <button type="button" className="btn-secondary" onClick={closeMaterialModal}>
+                  Cancelar
+                </button>
+                {selectedMaterial ? (
+                  <button type="button" className="btn-danger" onClick={() => void removeMaterial()} disabled={!canManageMaterials}>
+                    Eliminar
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </Page>
   );
 }

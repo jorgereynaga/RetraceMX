@@ -89,6 +89,15 @@ function fmtMXN(v: number) {
   return "$" + v.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function normalizeLookup(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 type EditState = {
   itemId: string;
   materialId: string;
@@ -153,6 +162,7 @@ export function PurchasePage() {
   const draftHydratingRef = useRef(false);
   const suppressPriceAutoFillRef = useRef(false);
   const operationRef = useRef<PurchaseOperation | null>(null);
+  const driverSelectionRef = useRef<{ id: string; input: string }>({ id: "", input: "" });
 
   const [items, setItems] = useState<TicketItem[]>([]);
   const [itemLoading, setItemLoading] = useState(false);
@@ -238,45 +248,69 @@ export function PurchasePage() {
   }, [activeDrivers, allOperations, customerId]);
   const driverSuggestions = useMemo(() => {
     if (!customerId) return [];
-    const q = driverInput.trim().toLowerCase();
+    const q = normalizeLookup(driverInput);
     if (!q) return customerDriverPool;
     return customerDriverPool.filter((d) => {
-      const name = d.person_name?.toLowerCase() ?? "";
-      const license = d.license_number.toLowerCase();
+      const name = normalizeLookup(d.person_name ?? "");
+      const license = normalizeLookup(d.license_number);
       return name.includes(q) || license.includes(q);
     });
   }, [customerDriverPool, customerId, driverInput]);
 
   const scaleDevice = useMemo(() => {
     const kind = method === "vehicle_differential" ? "vehicle_scale" : "secondary_scale";
-    return (
-      devices.find((d) => d.kind === kind && d.collection_center === centerId) ??
-      devices.find((d) => d.kind === kind) ??
-      null
-    );
+    const isBridgeDevice = (device: Device) =>
+      Boolean(device.metadata && typeof device.metadata === "object" && (device.metadata as Record<string, unknown>).bridge_mode);
+    const pickBest = (candidates: Device[]) =>
+      [...candidates].sort((a, b) => {
+        const bridgeDelta = Number(isBridgeDevice(b)) - Number(isBridgeDevice(a));
+        if (bridgeDelta !== 0) return bridgeDelta;
+        const connectedDelta = Number(b.is_connected) - Number(a.is_connected);
+        if (connectedDelta !== 0) return connectedDelta;
+        const seenA = a.last_seen_at ? Date.parse(a.last_seen_at) : 0;
+        const seenB = b.last_seen_at ? Date.parse(b.last_seen_at) : 0;
+        return seenB - seenA;
+      })[0] ?? null;
+    const sameCenter = devices.filter((d) => d.kind === kind && d.collection_center === centerId);
+    const anyOfKind = devices.filter((d) => d.kind === kind);
+    return pickBest(sameCenter) ?? pickBest(anyOfKind);
   }, [devices, method, centerId]);
+  const scaleBridgeMode = Boolean(scaleDevice?.metadata && typeof scaleDevice.metadata === "object" && (scaleDevice.metadata as Record<string, unknown>).bridge_mode);
+  const scaleDeviceLabel = scaleDevice
+    ? [
+        scaleDevice.name,
+        scaleDevice.identifier,
+        scaleBridgeMode ? "Puente local" : "Lectura directa",
+        scaleDevice.id ? `ID ${scaleDevice.id.slice(0, 8)}` : null,
+      ].filter(Boolean).join(" · ")
+    : "";
 
   const activeSessionId = operation?.active_weighing_session ?? null;
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (!autoRead || !scaleDevice) return;
+    if (!scaleDevice) return;
+    if (method === "manual_contingency") return;
     let cancelled = false;
     const poll = async () => {
       try {
-        const latest = activeSessionId
-          ? (await api.scaleReadingsBySession(activeSessionId))[0]
-          : await api.deviceReadScale(scaleDevice.id);
+        const latestByDevice = await api.deviceLatestScaleReading(scaleDevice.id).catch(() => null);
+        const latestBySession = !latestByDevice && activeSessionId ? (await api.scaleReadingsBySession(activeSessionId))[0] ?? null : null;
+        const latest = latestByDevice
+          ?? latestBySession
+          ?? (!latestByDevice && !latestBySession && (autoRead || activeSessionId) ? await api.deviceReadScale(scaleDevice.id) : null);
         if (!cancelled) {
           if (latest) {
+            const latestRow = latest as Record<string, unknown>;
+            const sessionReading = "session" in latest && "device" in latest;
             setLiveReading(
-              "session" in latest
-                ? readingToLiveReading(latest)
+              sessionReading
+                ? readingToLiveReading(latest as ScaleReading)
                 : {
-                    weight_kg: latest.weight_kg,
-                    is_stable: latest.is_stable,
-                    raw_value: latest.raw_value,
-                    captured_at: latest.captured_at,
+                    weight_kg: typeof latestRow.weight_kg === "string" && latestRow.weight_kg ? latestRow.weight_kg : "0",
+                    is_stable: typeof latestRow.is_stable === "boolean" ? latestRow.is_stable : true,
+                    raw_value: typeof latestRow.raw_value === "string" ? latestRow.raw_value : "",
+                    captured_at: typeof latestRow.captured_at === "string" && latestRow.captured_at ? latestRow.captured_at : new Date().toISOString(),
                   },
             );
           } else {
@@ -293,7 +327,7 @@ export function PurchasePage() {
       cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [autoRead, activeSessionId, scaleDevice?.id]);
+  }, [autoRead, activeSessionId, scaleBridgeMode, scaleDevice?.id]);
 
   const priceLookupSeq = useRef(0);
   useEffect(() => {
@@ -322,7 +356,8 @@ export function PurchasePage() {
     const priceItem = priceItemByMaterialId.get(material.id);
     if (!priceItem) return `${material.name}${material.code ? ` · ${material.code}` : ""}`;
     const priceValue = parseFloat(priceItem.unit_price) || 0;
-    return `${material.name}${material.code ? ` · ${material.code}` : ""} · ${fmtMXN(priceValue)}`;
+    const sourceLabel = priceItemSourceByMaterialId.get(material.id) === "provider" ? "proveedor" : "base";
+    return `${material.name}${material.code ? ` · ${material.code}` : ""} · ${fmtMXN(priceValue)} (${sourceLabel})`;
   }
 
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
@@ -364,25 +399,51 @@ export function PurchasePage() {
     return candidates.sort((a, b) => b.valid_from.localeCompare(a.valid_from) || a.name.localeCompare(b.name))[0] ?? null;
   }, [centerId, customerId, priceLists]);
   const fallbackPriceList = useMemo(() => {
-    if (!centerId) return null;
     const today = new Date().toISOString().slice(0, 10);
     const candidates = priceLists.filter((priceList) => (
-      priceList.collection_center === centerId
-      && !priceList.linked_party
+      priceList.code === "LP-GRAL-001"
       && priceList.is_active
       && priceList.valid_from <= today
       && (!priceList.valid_to || priceList.valid_to >= today)
     ));
     return candidates.sort((a, b) => b.valid_from.localeCompare(a.valid_from) || a.name.localeCompare(b.name))[0] ?? null;
-  }, [centerId, priceLists]);
+  }, [priceLists]);
   const selectedPriceList = activeCustomerPriceList ?? fallbackPriceList;
+  const isBasePriceList = selectedPriceList?.code === "LP-GRAL-001";
+  const customerPriceListItems = useMemo(
+    () => priceListItems.filter((item) => item.price_list === activeCustomerPriceList?.id && item.is_active),
+    [activeCustomerPriceList?.id, priceListItems],
+  );
+  const fallbackPriceListItems = useMemo(
+    () => priceListItems.filter((item) => item.price_list === fallbackPriceList?.id && item.is_active),
+    [fallbackPriceList?.id, priceListItems],
+  );
   const selectedPriceListItems = useMemo(
     () => priceListItems.filter((item) => item.price_list === selectedPriceList?.id && item.is_active),
     [priceListItems, selectedPriceList?.id],
   );
   const priceItemByMaterialId = useMemo(
-    () => new Map(selectedPriceListItems.map((item) => [item.material, item])),
-    [selectedPriceListItems],
+    () => {
+      const map = new Map(fallbackPriceListItems.map((item) => [item.material, item] as const));
+      for (const item of customerPriceListItems) {
+        map.set(item.material, item);
+      }
+      return map;
+    },
+    [customerPriceListItems, fallbackPriceListItems],
+  );
+  const priceItemSourceByMaterialId = useMemo(
+    () => {
+      const map = new Map<string, "provider" | "base">();
+      for (const item of fallbackPriceListItems) {
+        map.set(item.material, "base");
+      }
+      for (const item of customerPriceListItems) {
+        map.set(item.material, "provider");
+      }
+      return map;
+    },
+    [customerPriceListItems, fallbackPriceListItems],
   );
 
   const isDisc = liveReading?.raw_value === "DISCONNECTED";
@@ -562,8 +623,47 @@ export function PurchasePage() {
       setItemMsg("No hay báscula configurada para esta compra.");
       return;
     }
-    setAutoRead(true);
-    setItemMsg("Lectura iniciada. Espera un peso estable.");
+    try {
+      const currentMetadata = scaleDevice.metadata && typeof scaleDevice.metadata === "object"
+        ? (scaleDevice.metadata as Record<string, unknown>)
+        : {};
+      const updated = await api.devicePatch(scaleDevice.id, {
+        metadata: {
+          ...currentMetadata,
+          bridge_mode: true,
+          bridge_enabled: true,
+        },
+      });
+      setDevices((prev) => prev.map((device) => (device.id === updated.id ? updated : device)));
+      setAutoRead(true);
+      setItemMsg("Lectura iniciada. El puente del cliente ya puede leer la báscula.");
+    } catch (error) {
+      setItemMsg(error instanceof Error ? error.message : "No se pudo activar la lectura.");
+    }
+  }
+
+  async function pauseScaleReading() {
+    if (!scaleDevice) {
+      setAutoRead(false);
+      return;
+    }
+    try {
+      const currentMetadata = scaleDevice.metadata && typeof scaleDevice.metadata === "object"
+        ? (scaleDevice.metadata as Record<string, unknown>)
+        : {};
+      const updated = await api.devicePatch(scaleDevice.id, {
+        metadata: {
+          ...currentMetadata,
+          bridge_mode: true,
+          bridge_enabled: false,
+        },
+      });
+      setDevices((prev) => prev.map((device) => (device.id === updated.id ? updated : device)));
+      setAutoRead(false);
+      setItemMsg("Lectura pausada. El puente del cliente quedó en espera.");
+    } catch (error) {
+      setItemMsg(error instanceof Error ? error.message : "No se pudo pausar la lectura.");
+    }
   }
 
   function registerCurrentReading() {
@@ -616,21 +716,49 @@ export function PurchasePage() {
   }
 
   async function resolveDriverSelection(): Promise<string | null> {
-    const query = driverInput.trim().toLowerCase();
+    const selectedId = driverSelectionRef.current.id || driverId;
+    if (selectedId) return selectedId;
+    const rawInput = (driverSelectionRef.current.input || driverInput).trim();
+    const query = normalizeLookup(rawInput);
     if (!query) return null;
-    const pool = customerDriverPool.length ? customerDriverPool : activeDrivers;
-    const exact = pool.find((driver) => {
-      const name = driver.person_name?.trim().toLowerCase() ?? "";
-      const license = driver.license_number.trim().toLowerCase();
+    const pools = customerDriverPool.length ? [customerDriverPool, activeDrivers] : [activeDrivers];
+    const exact = pools.flat().find((driver) => {
+      const name = normalizeLookup(driver.person_name ?? "");
+      const license = normalizeLookup(driver.license_number);
       return name === query || license === query;
     });
     if (exact) return exact.id;
-    const partial = pool.find((driver) => {
-      const name = driver.person_name?.trim().toLowerCase() ?? "";
-      const license = driver.license_number.trim().toLowerCase();
+    const partial = pools.flat().find((driver) => {
+      const name = normalizeLookup(driver.person_name ?? "");
+      const license = normalizeLookup(driver.license_number);
       return name.includes(query) || license.includes(query);
     });
-    return partial?.id ?? null;
+    if (partial) return partial.id;
+    if (!rawInput) return null;
+
+    const createdPerson = await api.partyCreate({
+      kind: "person",
+      legal_name: rawInput,
+      trade_name: rawInput,
+      tax_id: "",
+      email: "",
+      phone: "",
+      address: "",
+      notes: "",
+      is_active: true,
+      commercial_roles: [],
+    });
+    const createdDriver = await api.driverCreate({
+      person: createdPerson.id,
+      license_number: "",
+      is_active: true,
+    });
+    setParties((current) => [...current, createdPerson]);
+    setDrivers((current) => [...current, createdDriver]);
+    driverSelectionRef.current = { id: createdDriver.id, input: rawInput };
+    setDriverId(createdDriver.id);
+    setDriverInput(rawInput);
+    return createdDriver.id;
   }
 
   async function openOperation() {
@@ -644,12 +772,13 @@ export function PurchasePage() {
         collection_center_id: centerId,
         customer_id: customerId,
         vehicle_id: resolvedVehicleId,
-        driver_id: resolvedDriverId || driverId || null,
+        driver_id: resolvedDriverId || driverSelectionRef.current.id || driverId || null,
       });
       setOperation(op);
       setItems([]);
       setConfirmed(false);
       setPrintMsg(null);
+      driverSelectionRef.current = { id: op.driver ?? "", input: op.driver_name ?? drivers.find((d) => d.id === op.driver)?.person_name ?? "" };
       applyWeighingDraft(readWeighingDraft(op));
       loadTodayOps();
     } catch (e) {
@@ -977,6 +1106,7 @@ export function PurchasePage() {
     setCustomerCreateError(null); setPlateInput(""); setCustomerVehicles([]);
     setDriverId("");
     setDriverInput(""); setShowDriverSuggestions(false);
+    driverSelectionRef.current = { id: "", input: "" };
     applyWeighingDraft(null);
     setFamilyFilter("");
     setEditState(null);
@@ -1231,7 +1361,11 @@ export function PurchasePage() {
                   </select>
                   {materialId && priceItemByMaterialId.get(materialId) && (
                     <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 4 }}>
-                      Precio del cliente: <strong style={{ color: "var(--text)" }}>{fmtMXN(parseFloat(priceItemByMaterialId.get(materialId)?.unit_price ?? "0") || 0)}</strong>
+                      Precio vigente:{" "}
+                      <strong style={{ color: "var(--text)" }}>
+                        {fmtMXN(parseFloat(priceItemByMaterialId.get(materialId)?.unit_price ?? "0") || 0)}
+                      </strong>
+                      {priceItemSourceByMaterialId.get(materialId) === "provider" ? " · lista del proveedor" : " · lista base general"}
                     </div>
                   )}
                 </label>
@@ -1257,9 +1391,6 @@ export function PurchasePage() {
                     setShowCustomerSuggestions(true);
                     setCustomerCreateError(null);
                     setPlateInput("");
-                    setDriverId("");
-                    setDriverInput("");
-                    setShowDriverSuggestions(false);
                   }}
                   onFocus={() => setShowCustomerSuggestions(true)}
                   onBlur={() => setTimeout(() => setShowCustomerSuggestions(false), 150)}
@@ -1315,8 +1446,6 @@ export function PurchasePage() {
                             setShowCustomerSuggestions(false);
                             setCustomerCreateError(null);
                             setPlateInput("");
-                            setDriverId("");
-                            setDriverInput("");
                             setShowDriverSuggestions(false);
                           }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
@@ -1442,7 +1571,12 @@ export function PurchasePage() {
                           : "Escribe el conductor"
                     }
                     disabled={!customerId || !!operation}
-                    onChange={(e) => { setDriverInput(e.target.value); setDriverId(""); setShowDriverSuggestions(true); }}
+                    onChange={(e) => {
+                      setDriverInput(e.target.value);
+                      setDriverId("");
+                      driverSelectionRef.current = { id: "", input: e.target.value };
+                      setShowDriverSuggestions(true);
+                    }}
                     onFocus={() => setShowDriverSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowDriverSuggestions(false), 150)}
                     autoComplete="off"
@@ -1461,6 +1595,7 @@ export function PurchasePage() {
                           onMouseDown={() => {
                             setDriverId(d.id);
                             setDriverInput(d.person_name ?? d.license_number ?? d.id);
+                            driverSelectionRef.current = { id: d.id, input: d.person_name ?? d.license_number ?? d.id };
                             setShowDriverSuggestions(false);
                           }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
@@ -1477,7 +1612,7 @@ export function PurchasePage() {
                   {driverInput && !operation && (
                     <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 3 }}>
                       {driverSuggestions.find((d) => d.id === driverId) ||
-                      activeDrivers.find((d) => d.person_name?.trim().toLowerCase() === driverInput.trim().toLowerCase() || d.license_number.trim().toLowerCase() === driverInput.trim().toLowerCase())
+                      activeDrivers.find((d) => normalizeLookup(d.person_name ?? "") === normalizeLookup(driverInput) || normalizeLookup(d.license_number) === normalizeLookup(driverInput))
                         ? "✓ Conductor registrado"
                         : "⚠ Se usará la coincidencia elegida al iniciar la compra"}
                     </div>
@@ -1576,9 +1711,16 @@ export function PurchasePage() {
                 </span>
                 {selectedPriceListItems.length > 0 && (
                   <span style={{ fontSize: "0.76rem", color: "var(--muted)" }}>
-                    {selectedPriceListItems.length} material{selectedPriceListItems.length !== 1 ? "es" : ""} con precio enlazado.
+                    {(isBasePriceList ? fallbackPriceListItems.length : customerPriceListItems.length)} material
+                    {(isBasePriceList ? fallbackPriceListItems.length : customerPriceListItems.length) !== 1 ? "es" : ""}{" "}
+                    con precio {isBasePriceList ? "base" : "especial"}.
                   </span>
                 )}
+                {!isBasePriceList && selectedPriceList?.linked_party ? (
+                  <span style={{ fontSize: "0.76rem", color: "var(--muted)" }}>
+                    Si un material no está en la lista del proveedor, se toma el precio base del centro.
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1775,6 +1917,11 @@ export function PurchasePage() {
               {scaleDevice && <span className="badge badge-gray" style={{ fontSize: "0.7rem" }}>{scaleDevice.name}</span>}
             </div>
             <div className="section-panel-body" style={{ display: "grid", gap: 14 }}>
+              {scaleDevice && (
+                <div className="info-banner" style={{ fontSize: "0.8rem" }}>
+                  <strong>Dispositivo activo:</strong> {scaleDeviceLabel}
+                </div>
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <label>
@@ -1851,7 +1998,7 @@ export function PurchasePage() {
                       style={{ flex: 1 }}
                       onClick={() => {
                         if (autoRead) {
-                          setAutoRead(false);
+                          void pauseScaleReading();
                           return;
                         }
                         void startScaleReading();

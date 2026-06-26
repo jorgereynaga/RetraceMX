@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+﻿import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/resources";
 import { RouteMap, type RouteMapPoint } from "../components/RouteMap";
+import { CatalogImportExportButton } from "../components/CatalogImportExportButton";
 import type { CollectionCenter, Route } from "../types";
 import { Page } from "../components/Page";
 import { Pagination } from "../components/Pagination";
@@ -165,11 +166,11 @@ export function RoutesPage() {
         <body>
           <div class="sheet">
             <div class="title">FICHA DE RUTA</div>
-            <div class="sub">ACOPIO360 - Planeacion y control operativo</div>
+            <div class="sub">ACOPIO360 - Planeación y control operativo</div>
             <div class="line"></div>
             <div class="grid">
-              <div><span class="label">Codigo:</span> ${selectedRoute.code}</div>
-              <div><span class="label">Activa:</span> ${selectedRoute.is_active ? "Si" : "No"}</div>
+              <div><span class="label">Código:</span> ${selectedRoute.code}</div>
+              <div><span class="label">Activa:</span> ${selectedRoute.is_active ? "Sí" : "No"}</div>
               <div><span class="label">Nombre:</span> ${selectedRoute.name}</div>
               <div><span class="label">Origen:</span> ${selectedRoute.origin_center_name ?? selectedRoute.origin_center}</div>
               <div><span class="label">Destino:</span> ${selectedRoute.destination_center_name ?? selectedRoute.destination_center}</div>
@@ -182,8 +183,8 @@ export function RoutesPage() {
               <div class="box">
                 <div>Rutas activas: ${items.filter((route) => route.is_active).length}</div>
                 <div>Total de rutas: ${items.length}</div>
-                <div>Orígenes unicos: ${new Set(items.map((route) => route.origin_center)).size}</div>
-                <div>Destinos unicos: ${new Set(items.map((route) => route.destination_center)).size}</div>
+                <div>Orígenes: ${new Set(items.map((route) => route.origin_center)).size}</div>
+                <div>Destinos únicos: ${new Set(items.map((route) => route.destination_center)).size}</div>
               </div>
             </div>
             <div class="section">
@@ -194,7 +195,7 @@ export function RoutesPage() {
                 <div>Destino operativo: ${selectedDestinationCenter?.name ?? selectedRoute.destination_center_name ?? selectedRoute.destination_center}</div>
               </div>
             </div>
-            <div class="footer">Copia sin valor fiscal - Documento interno de planeacion</div>
+            <div class="footer">Copia sin valor fiscal - Documento interno de planeación</div>
           </div>
         </body>
       </html>
@@ -295,6 +296,11 @@ export function RoutesPage() {
 
   return (
     <Page title="Rutas" actions={<span className="muted">Planeación de orígenes, destinos y fichas operativas</span>}>
+      {userCan(user, "catalog.export") ? (
+        <div className="page-actions">
+          <CatalogImportExportButton catalog="routes" search={search} selectedIds={selectedRouteId ? [selectedRouteId] : []} />
+        </div>
+      ) : null}
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
       <section className="metric-grid" style={{ marginBottom: 16, gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
@@ -322,7 +328,7 @@ export function RoutesPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por codigo, nombre, origen, destino o notas"
+            placeholder="Buscar por código, nombre, origen, destino o notas"
           />
         </label>
       </div>

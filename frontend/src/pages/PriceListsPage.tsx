@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/resources";
 import type { CollectionCenter, Material, Party, PriceList, PriceListItem } from "../types";
 import { Page } from "../components/Page";
+import { CatalogImportExportButton } from "../components/CatalogImportExportButton";
 import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
 import { matchesSearch, paginate } from "../utils/listing";
@@ -61,6 +62,7 @@ export function PriceListsPage() {
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedListId, setSelectedListId] = useState("");
   const [selectedItemId, setSelectedItemId] = useState("");
+  const [isListModalOpen, setIsListModalOpen] = useState(false);
   const [listForm, setListForm] = useState(emptyListForm());
   const [itemForm, setItemForm] = useState(emptyItemForm());
   const [duplicatePartyId, setDuplicatePartyId] = useState("");
@@ -73,6 +75,7 @@ export function PriceListsPage() {
   const [listSortDirection, setListSortDirection] = useState<"asc" | "desc">("asc");
   const [message, setMessage] = useState<string | null>(null);
   const [pendingSelectedListId, setPendingSelectedListId] = useState<string | null>(null);
+  const [isGeneratingBase, setIsGeneratingBase] = useState(false);
   const itemFormRef = useRef<HTMLFormElement | null>(null);
 
   async function refresh() {
@@ -193,6 +196,19 @@ export function PriceListsPage() {
 
   useEffect(() => {
     if (selectedList) {
+      setItemForm(emptyItemForm(selectedList.id));
+      setDuplicatePartyId(selectedList.linked_party ?? "");
+      setDuplicateCode(`${selectedList.code}-copia`);
+    } else {
+      setItemForm(emptyItemForm());
+      setDuplicatePartyId("");
+      setDuplicateCode("");
+    }
+  }, [selectedList]);
+
+  useEffect(() => {
+    if (!isListModalOpen) return;
+    if (selectedList) {
       setListForm({
         code: selectedList.code,
         collection_center: selectedList.collection_center,
@@ -202,16 +218,10 @@ export function PriceListsPage() {
         valid_to: selectedList.valid_to ?? "",
         is_active: selectedList.is_active,
       });
-      setItemForm(emptyItemForm(selectedList.id));
-      setDuplicatePartyId(selectedList.linked_party ?? "");
-      setDuplicateCode(`${selectedList.code}-copia`);
     } else {
       setListForm(emptyListForm());
-      setItemForm(emptyItemForm());
-      setDuplicatePartyId("");
-      setDuplicateCode("");
     }
-  }, [selectedList]);
+  }, [isListModalOpen, selectedList]);
 
   useEffect(() => {
     if (selectedItem) {
@@ -273,6 +283,19 @@ export function PriceListsPage() {
     setListForm(emptyListForm());
     setItemForm(emptyItemForm());
     setPendingSelectedListId(null);
+    setIsListModalOpen(true);
+    setMessage(null);
+  }
+
+  function openEditListModal(priceList: PriceList) {
+    setSelectedListId(priceList.id);
+    setIsListModalOpen(true);
+    setMessage(null);
+  }
+
+  function closeListModal() {
+    setIsListModalOpen(false);
+    setListForm(emptyListForm());
   }
 
   function startNewItem() {
@@ -309,7 +332,7 @@ export function PriceListsPage() {
         setMessage("Lista de precios creada.");
       }
       setSelectedItemId("");
-      setListForm(emptyListForm());
+      closeListModal();
       setItemForm(emptyItemForm());
       await refresh();
     } catch (error) {
@@ -317,20 +340,21 @@ export function PriceListsPage() {
     }
   }
 
-  async function removeList() {
-    if (!selectedList) return;
+  async function removeList(priceList: PriceList | null = selectedList) {
+    if (!priceList) return;
     if (!canManagePriceLists) {
       setMessage("No tienes permiso para eliminar listas de precios.");
       return;
     }
-    if (!window.confirm(`¿Seguro que deseas eliminar la lista ${selectedListDisplayName}? Esta acción no se puede deshacer.`)) {
+    const displayName = priceList.id === selectedList?.id ? selectedListDisplayName : buildPriceListName(priceList.code, priceList.linked_party ?? "", partyById);
+    if (!window.confirm(`¿Seguro que deseas eliminar la lista ${displayName}? Esta acción no se puede deshacer.`)) {
       return;
     }
     setMessage(null);
     try {
-      await api.priceListDelete(selectedList.id);
+      await api.priceListDelete(priceList.id);
       setMessage("Lista de precios eliminada.");
-      setSelectedListId("");
+      closeListModal();
       setSelectedItemId("");
       setListForm(emptyListForm());
       setItemForm(emptyItemForm());
@@ -369,6 +393,32 @@ export function PriceListsPage() {
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo duplicar la lista");
+    }
+  }
+
+  async function handleGenerateBaseList() {
+    if (!canManagePriceLists) {
+      setMessage("No tienes permiso para generar la lista base.");
+      return;
+    }
+    if (!window.confirm("¿Quieres generar o actualizar la lista base LP-GRAL-001 con los precios de compra estándar?")) {
+      return;
+    }
+    setIsGeneratingBase(true);
+    setMessage(null);
+    try {
+      const result = await api.priceListGenerateBase();
+      const missingPreview = result.missing_materials.slice(0, 10).map((item) => `${item.code} (${item.name})`);
+      const remainingMissing = result.missing_materials.length - missingPreview.length;
+      const missing = missingPreview.join(", ");
+      setMessage(
+        `Lista base lista. Procesados: ${result.summary.processed}. Creados: ${result.summary.created}. Actualizados: ${result.summary.updated}. Omitidos: ${result.summary.omitted}. Materiales no encontrados: ${result.summary.missing_materials_count}.${missing ? ` Faltantes: ${missing}${remainingMissing > 0 ? ` y ${remainingMissing} más` : ""}.` : ""}`,
+      );
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo generar la lista base");
+    } finally {
+      setIsGeneratingBase(false);
     }
   }
 
@@ -429,12 +479,42 @@ export function PriceListsPage() {
 
   return (
     <Page title="Listas de precios" actions={<span className="muted">Precios por centro y material valorizable</span>}>
+      {userCan(user, "catalog.export") ? (
+        <div className="page-actions">
+          {canManagePriceLists ? (
+            <button type="button" className="btn-primary" onClick={startNewList}>
+              Nueva lista
+            </button>
+          ) : null}
+          {canManagePriceLists ? (
+            <button type="button" className="btn-secondary" onClick={() => void handleGenerateBaseList()} disabled={isGeneratingBase}>
+              {isGeneratingBase ? "Generando..." : "Generar Lista Base"}
+            </button>
+          ) : null}
+          <CatalogImportExportButton catalog="price-lists" search={listSearch} selectedIds={selectedListId ? [selectedListId] : []} />
+        </div>
+      ) : null}
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
+      <div className="catalog-top-row" style={{ marginBottom: 16 }}>
+        <section className="metric-panel">
+          <span>Total de registros</span>
+          <strong>{priceLists.length}</strong>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Crea listas por centro, enlázalas a una persona o empresa y duplica también sus materiales cuando necesites reutilizar una estructura comercial.
+          </div>
+        </section>
+        <label className="search-box metric-panel">
+          Búsqueda rápida en listas
+          <input
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            placeholder="Buscar por código, lista, centro, moneda o vigencia"
+          />
+        </label>
+      </div>
+
       <section className="metric-panel" style={{ marginBottom: 16 }}>
-        <div className="muted" style={{ marginBottom: 10, fontSize: "0.9rem" }}>
-          Crea listas por centro, enlázalas a una persona o empresa y duplica también sus materiales cuando necesites reutilizar una estructura comercial.
-        </div>
         <div className="grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
           <div className="metric-card">
             <span>Total de listas</span>
@@ -455,17 +535,6 @@ export function PriceListsPage() {
         </div>
       </section>
 
-        <div className="metric-panel" style={{ marginBottom: 12 }}>
-          <label className="search-box">
-            Búsqueda rápida en listas
-            <input
-              value={listSearch}
-              onChange={(e) => setListSearch(e.target.value)}
-              placeholder="Buscar por código, lista, centro, moneda o vigencia"
-            />
-          </label>
-        </div>
-
         <section className="metric-panel">
           <h3 style={{ marginTop: 0 }}>Listas guardadas</h3>
           <table className="table">
@@ -475,6 +544,7 @@ export function PriceListsPage() {
                 <th><SortableHeader label="Centro" active={listSortKey === "center"} direction={listSortDirection} onClick={() => toggleListSort("center")} /></th>
                 <th>Persona / empresa</th>
                 <th><SortableHeader label="Activa" active={listSortKey === "active"} direction={listSortDirection} onClick={() => toggleListSort("active")} /></th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -488,6 +558,32 @@ export function PriceListsPage() {
                   <td>{centerLabel(centerById[priceList.collection_center])}</td>
                   <td>{partyById[priceList.linked_party ?? ""]?.trade_name ?? partyById[priceList.linked_party ?? ""]?.legal_name ?? priceList.linked_party_name ?? "Lista general"}</td>
                   <td>{priceList.is_active ? "Sí" : "No"}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="btn-secondary table-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openEditListModal(priceList);
+                        }}
+                        disabled={!canManagePriceLists}
+                      >
+                        Modificar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-danger table-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeList(priceList);
+                        }}
+                        disabled={!canManagePriceLists}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -500,87 +596,98 @@ export function PriceListsPage() {
           />
         </section>
 
-      <section className="metric-panel" style={{ marginBottom: 18 }}>
-        <div className="section-header">
-          <div>
-            <h3 style={{ margin: 0 }}>Lista de precios</h3>
-            <div className="muted" style={{ marginTop: 4 }}>
-              Formulario para crear o editar la lista completa.
+      {isListModalOpen ? (
+        <div className="catalog-dialog-backdrop" role="presentation" onClick={closeListModal}>
+          <div
+            className="catalog-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedList ? "Editar lista de precios" : "Nueva lista de precios"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="catalog-dialog-header">
+              <div>
+                <strong>{selectedList ? "Editar lista de precios" : "Nueva lista de precios"}</strong>
+                <div className="muted">Formulario para crear o editar la lista completa.</div>
+              </div>
+              <button type="button" className="ghost-button" onClick={closeListModal}>
+                Cerrar
+              </button>
             </div>
+            <form className="inline-form compact-form price-list-form" onSubmit={handleListSubmit}>
+              <label>
+                Código
+                <input value={listForm.code} onChange={(e) => updateListField("code", e.target.value)} required />
+              </label>
+              <label>
+                Cliente / empresa enlazada
+                <select value={listForm.linked_party} onChange={(e) => updateListField("linked_party", e.target.value)}>
+                  <option value="">Lista general del centro</option>
+                  {availablePartiesForForm.map((party) => (
+                    <option key={party.id} value={party.id}>
+                      {partyLabel(party)}
+                    </option>
+                  ))}
+                </select>
+                {selectedListPartyConflict && (
+                  <div style={{ fontSize: "0.75rem", color: "var(--danger)", marginTop: 4 }}>
+                    Ese cliente ya tiene una lista: {selectedListPartyConflict.code} · {selectedListPartyConflict.name}
+                  </div>
+                )}
+              </label>
+              <label>
+                Centro
+                <select value={listForm.collection_center} onChange={(e) => updateListField("collection_center", e.target.value)} required>
+                  <option value="">Seleccionar</option>
+                  {centers.map((center) => (
+                    <option key={center.id} value={center.id}>
+                      {center.code} · {center.name} · {center.kind === "smelter" ? "Fundidora" : center.kind === "destination" ? "Destino" : "Acopio"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Moneda
+                <input value={listForm.currency} onChange={(e) => updateListField("currency", e.target.value)} placeholder="MXN" />
+              </label>
+              <label>
+                Vigencia desde
+                <input type="date" value={listForm.valid_from} onChange={(e) => updateListField("valid_from", e.target.value)} required />
+              </label>
+              <label>
+                Vigencia hasta
+                <input type="date" value={listForm.valid_to} onChange={(e) => updateListField("valid_to", e.target.value)} />
+              </label>
+              <label>
+                Activa
+                <div className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={listForm.is_active}
+                    onChange={(e) => updateListField("is_active", e.target.checked)}
+                  />
+                  <span>{listForm.is_active ? "Activa" : "Inactiva"}</span>
+                </div>
+              </label>
+              <div className="full-width-form-field" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="submit" className="btn-primary" disabled={!canManagePriceLists || !!selectedListPartyConflict}>
+                  {selectedList ? "Actualizar" : "Crear"} lista
+                </button>
+                <button type="button" className="btn-secondary" onClick={closeListModal}>
+                  Cancelar
+                </button>
+                {selectedList ? (
+                  <button type="button" className="btn-danger" onClick={() => void removeList()} disabled={!canManagePriceLists}>
+                    Eliminar
+                  </button>
+                ) : null}
+              </div>
+            </form>
           </div>
         </div>
-        <form className="inline-form compact-form price-list-form" onSubmit={handleListSubmit}>
-          <label>
-            Código
-            <input value={listForm.code} onChange={(e) => updateListField("code", e.target.value)} required />
-          </label>
-          <label>
-            Cliente / empresa enlazada
-            <select value={listForm.linked_party} onChange={(e) => updateListField("linked_party", e.target.value)}>
-              <option value="">Lista general del centro</option>
-              {availablePartiesForForm.map((party) => (
-                <option key={party.id} value={party.id}>
-                  {partyLabel(party)}
-                </option>
-              ))}
-            </select>
-            {selectedListPartyConflict && (
-              <div style={{ fontSize: "0.75rem", color: "var(--danger)", marginTop: 4 }}>
-                Ese cliente ya tiene una lista: {selectedListPartyConflict.code} · {selectedListPartyConflict.name}
-              </div>
-            )}
-          </label>
-          <label>
-            Centro
-            <select value={listForm.collection_center} onChange={(e) => updateListField("collection_center", e.target.value)} required>
-              <option value="">Seleccionar</option>
-              {centers.map((center) => (
-                <option key={center.id} value={center.id}>
-                  {center.code} · {center.name} · {center.kind === "smelter" ? "Fundidora" : center.kind === "destination" ? "Destino" : "Acopio"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Moneda
-            <input value={listForm.currency} onChange={(e) => updateListField("currency", e.target.value)} placeholder="MXN" />
-          </label>
-          <label>
-            Vigencia desde
-            <input type="date" value={listForm.valid_from} onChange={(e) => updateListField("valid_from", e.target.value)} required />
-          </label>
-          <label>
-            Vigencia hasta
-            <input type="date" value={listForm.valid_to} onChange={(e) => updateListField("valid_to", e.target.value)} />
-          </label>
-          <label>
-            Activa
-            <div className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={listForm.is_active}
-                onChange={(e) => updateListField("is_active", e.target.checked)}
-              />
-              <span>{listForm.is_active ? "Activa" : "Inactiva"}</span>
-            </div>
-          </label>
-          <div className="full-width-form-field" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button type="submit" disabled={!canManagePriceLists || !!selectedListPartyConflict}>
-              {selectedList ? "Actualizar" : "Crear"} lista
-            </button>
-            <button type="button" className="ghost-button" onClick={startNewList}>
-              Limpiar
-            </button>
-            {selectedList ? (
-              <button type="button" className="ghost-button" onClick={removeList} disabled={!canManagePriceLists}>
-                Eliminar
-              </button>
-            ) : null}
-          </div>
-        </form>
-      </section>
+      ) : null}
 
-        <section className="metric-panel" style={{ marginBottom: 16 }}>
+      <section className="metric-panel" style={{ marginBottom: 16 }}>
           <div className="section-header">
             <div>
               <h3 style={{ margin: 0 }}>Duplicar lista seleccionada</h3>
@@ -675,6 +782,14 @@ export function PriceListsPage() {
                 Selecciona una lista y asigna un precio unitario al material.
               </div>
             </div>
+            {userCan(user, "catalog.export") ? (
+              <CatalogImportExportButton
+                catalog="price-list-items"
+                search={materialSearch}
+                selectedIds={selectedItemId ? [selectedItemId] : []}
+                extraQueryParams={{ price_list: selectedListId || itemForm.price_list || undefined }}
+              />
+            ) : null}
           </div>
           <form ref={itemFormRef} className="inline-form compact-form price-item-form" onSubmit={handleItemSubmit}>
             <label>
@@ -750,3 +865,4 @@ export function PriceListsPage() {
     </Page>
   );
 }
+

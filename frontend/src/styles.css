@@ -208,6 +208,14 @@ label {
   letter-spacing: -0.02em;
 }
 
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* ── Buttons ─────────────────────────────── */
 button {
   cursor: pointer;
@@ -911,6 +919,39 @@ textarea { min-height: 84px; resize: vertical; }
 .sortable-header-indicator { font-size: 0.78rem; }
 
 /* ── Misc form layouts ─────────────────────────────── */
+.party-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.party-total-panel,
+.party-search-box {
+  min-width: 0;
+}
+
+.party-search-box input {
+  width: 100%;
+}
+
+.catalog-top-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.catalog-top-row .metric-panel,
+.catalog-top-row .search-box {
+  min-width: 0;
+  margin: 0;
+}
+
+.catalog-top-row .search-box input {
+  width: 100%;
+}
+
 .party-form { display: grid; gap: 14px; }
 .party-form-row { display: grid; gap: 12px; }
 .party-form-primary-row { grid-template-columns: repeat(7, minmax(0, 1fr)); }
@@ -918,6 +959,17 @@ textarea { min-height: 84px; resize: vertical; }
 .party-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
 .party-roles-field { min-width: 0; }
 .party-notes-field { grid-column: span 2; }
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-action-button {
+  padding: 7px 12px;
+  font-size: 0.8rem;
+}
 
 .route-form { display: grid; gap: 14px; }
 .route-form-row { display: grid; gap: 12px; }
@@ -1002,6 +1054,102 @@ textarea { min-height: 84px; resize: vertical; }
 
 .section-panel-body { padding: 16px 20px; }
 
+.catalog-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 50;
+}
+
+.catalog-dialog {
+  width: min(1240px, 100%);
+  max-height: min(92vh, 980px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.catalog-dialog-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.catalog-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.catalog-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.catalog-dialog-import,
+.catalog-dialog-preview,
+.catalog-dialog-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.catalog-dialog-summary {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: start;
+}
+
+.catalog-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.party-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.72);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 50;
+}
+
+.party-modal {
+  width: min(1280px, 100%);
+  max-height: min(92vh, 980px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.party-modal-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.party-modal .party-form {
+  margin: 0;
+}
+
 /* ── Responsive ─────────────────────────────── */
 @media (max-width: 960px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -1016,4 +1164,8 @@ textarea { min-height: 84px; resize: vertical; }
   .price-list-form, .price-item-form { grid-template-columns: 1fr; }
   .materials-form { grid-template-columns: 1fr; }
   .party-form-primary-row, .party-form-secondary-row { grid-template-columns: 1fr; }
+  .party-toolbar { grid-template-columns: 1fr; }
+  .catalog-top-row { grid-template-columns: 1fr; }
+  .catalog-dialog-grid { grid-template-columns: 1fr; }
+  .party-modal { width: min(100%, 1000px); }
 }

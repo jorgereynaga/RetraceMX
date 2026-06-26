@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiList, apiListAll, apiPatch, apiPost, apiPostFormData, apiPut } from "./client";
+import { apiDelete, apiDownload, apiGet, apiList, apiListAll, apiPatch, apiPost, apiPostFormData, apiPut } from "./client";
 import type {
   AuditLog,
   CollectionCenter,
@@ -28,6 +28,7 @@ import type {
   PurchaseOperation,
   PriceList,
   PriceListItem,
+  PriceListBaseGenerationResponse,
   PriceSuggestion,
   ProcessType,
   Route,
@@ -43,15 +44,122 @@ import type {
   GPSPosition,
 } from "../types";
 
+export type CatalogMetadata = {
+  slug: string;
+  title: string;
+  description: string;
+  export_headers: string[];
+  import_headers: string[];
+  example_rows: Array<Record<string, string>>;
+};
+
+export type CatalogImportJob = {
+  job: {
+    id: string;
+    catalog: string;
+    catalog_title: string;
+    mode: string;
+    file_format: "csv" | "xlsx";
+    original_filename: string;
+    status: string;
+    created_by: string | null;
+    created_by_name: string | null;
+    preview_data?: Record<string, unknown>;
+    result_data?: Record<string, unknown>;
+    summary?: Record<string, unknown> | null;
+    error_message?: string;
+    created_at?: string;
+    updated_at?: string;
+    processed_at?: string | null;
+  };
+};
+
+export type CatalogImportPreviewResponse = CatalogImportJob & {
+  preview: {
+    job_id: string;
+    catalog: string;
+    title: string;
+    headers: string[];
+    missing_headers: string[];
+    rows: Array<{
+      row_number: number;
+      action: string;
+      status: "valid" | "invalid" | "omitted";
+      errors: string[];
+      values: Record<string, string>;
+      lookup: Record<string, string>;
+    }>;
+    summary: {
+      total_rows: number;
+      valid_rows: number;
+      invalid_rows: number;
+      omitted_rows: number;
+      found_rows: number;
+      duplicates: number;
+      missing_headers: string[];
+    };
+  };
+};
+
+export type CatalogImportExecuteResponse = CatalogImportJob & {
+  result: {
+    job_id: string;
+    catalog: string;
+    summary: {
+      processed: number;
+      found: number;
+      created: number;
+      updated: number;
+      omitted: number;
+      rejected: number;
+      errors: number;
+    };
+  };
+};
+
 export const api = {
   login: (username: string, password: string) => apiPost<{ token: string; user: User }>("/auth/login/", { username, password }),
+  catalogMetadata: () => apiList<CatalogMetadata>("/catalogs/"),
+  catalogExport: (catalog: string, params: Record<string, string | undefined> = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null && value !== "") {
+        query.set(key, value);
+      }
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return apiDownload(`/catalogs/${catalog}/export/${suffix}`);
+  },
+  catalogTemplate: (catalog: string, params: Record<string, string | undefined> = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null && value !== "") {
+        query.set(key, value);
+      }
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return apiDownload(`/catalogs/${catalog}/template/${suffix}`);
+  },
+  catalogImportPreview: (catalog: string, payload: FormData) => apiPostFormData<CatalogImportPreviewResponse>(`/catalogs/${catalog}/import/preview/`, payload),
+  catalogImportExecute: (catalog: string, jobId: string) => apiPost<CatalogImportExecuteResponse>(`/catalogs/${catalog}/import/execute/`, { job_id: jobId }),
+  catalogImportHistory: (catalog: string) => apiList<CatalogImportJob["job"]>(`/catalogs/${catalog}/import/history/`),
+  catalogImportReport: (catalog: string, jobId: string, params: Record<string, string | undefined> = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null && value !== "") {
+        query.set(key, value);
+      }
+    });
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return apiDownload(`/catalogs/${catalog}/import/${jobId}/report/${suffix}`);
+  },
   users: () => apiListAll<User>("/users/"),
   userCreate: (payload: Record<string, unknown>) => apiPost<User>("/users/", payload),
   userUpdate: (id: string, payload: Record<string, unknown>) => apiPut<User>(`/users/${id}/`, payload),
   userPatch: (id: string, payload: Record<string, unknown>) => apiPatch<User>(`/users/${id}/`, payload),
   userDelete: (id: string) => apiDelete<void>(`/users/${id}/`),
   roles: () => apiListAll<Role>("/roles/"),
-  centers: () => apiList<CollectionCenter>("/collection-centers/"),
+  centers: () => apiListAll<CollectionCenter>("/collection-centers/"),
   centerCreate: (payload: Record<string, unknown>) => apiPost<CollectionCenter>("/collection-centers/", payload),
   centerUpdate: (id: string, payload: Record<string, unknown>) => apiPut<CollectionCenter>(`/collection-centers/${id}/`, payload),
   centerPatch: (id: string, payload: Record<string, unknown>) => apiPatch<CollectionCenter>(`/collection-centers/${id}/`, payload),
@@ -77,10 +185,11 @@ export const api = {
   materialUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Material>(`/materials/${id}/`, payload),
   materialPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Material>(`/materials/${id}/`, payload),
   materialDelete: (id: string) => apiDelete<void>(`/materials/${id}/`),
-  priceLists: () => apiList<PriceList>("/price-lists/"),
+  priceLists: () => apiListAll<PriceList>("/price-lists/"),
   priceListCreate: (payload: Record<string, unknown>) => apiPost<PriceList>("/price-lists/", payload),
   priceListUpdate: (id: string, payload: Record<string, unknown>) => apiPut<PriceList>(`/price-lists/${id}/`, payload),
   priceListDuplicate: (id: string, payload: Record<string, unknown>) => apiPost<PriceList>(`/price-lists/${id}/duplicate/`, payload),
+  priceListGenerateBase: () => apiPost<PriceListBaseGenerationResponse>("/price-lists/generate-base/", {}),
   priceListDelete: (id: string) => apiDelete<void>(`/price-lists/${id}/`),
   priceListItems: () => apiListAll<PriceListItem>("/price-list-items/"),
   priceListItemCreate: (payload: Record<string, unknown>) => apiPost<PriceListItem>("/price-list-items/", payload),
@@ -93,7 +202,7 @@ export const api = {
   partyUpdate: (id: string, payload: Record<string, unknown>) => apiPut<Party>(`/parties/${id}/`, payload),
   partyPatch: (id: string, payload: Record<string, unknown>) => apiPatch<Party>(`/parties/${id}/`, payload),
   partyDelete: (id: string) => apiDelete<void>(`/parties/${id}/`),
-  parties: () => apiList<Party>("/parties/"),
+  parties: () => apiListAll<Party>("/parties/"),
   partiesAll: () => apiListAll<Party>("/parties/"),
   materials: () => apiListAll<Material>("/materials/"),
   materialsAll: () => apiListAll<Material>("/materials/"),
@@ -101,12 +210,17 @@ export const api = {
   vehiclesByOwner: (ownerId: string) => apiList<Vehicle>(`/vehicles/?owner=${encodeURIComponent(ownerId)}`),
   vehicleCreate: (payload: Record<string, unknown>) => apiPost<Vehicle>("/vehicles/", payload),
   vehicleDelete: (id: string) => apiDelete<void>(`/vehicles/${id}/`),
+  driverCreate: (payload: Record<string, unknown>) => apiPost<Driver>("/drivers/", payload),
   deleteTicketItem: (id: string) => apiDelete<void>(`/ticket-items/${id}/`),
   drivers: () => apiList<Driver>("/drivers/"),
   devices: () => apiListAll<Device>("/devices/"),
+  deviceCreate: (payload: Record<string, unknown>) => apiPost<Device>("/devices/", payload),
   devicePatch: (id: string, payload: Record<string, unknown>) => apiPatch<Device>(`/devices/${id}/`, payload),
+  deviceDelete: (id: string) => apiDelete<void>(`/devices/${id}/`),
   deviceReadScale: (deviceId: string) =>
     apiPost<{ device_id: string; device_name: string; kind: string; raw_value: string; weight_kg: string; is_stable: boolean; is_manual_fallback: boolean; port: string; captured_at: string }>(`/devices/${deviceId}/read_scale/`, {}),
+  deviceLatestScaleReading: (deviceId: string) =>
+    apiGet<ScaleReading>(`/devices/${deviceId}/latest_reading/`),
   deviceProbeScale: (deviceId: string, payload: Record<string, unknown> = {}) =>
     apiPost<{ device_id: string; device_name: string; kind: string; port: string; captured_at: string; line_count: number; lines: Array<{ text: string; hex: string }> }>(`/devices/${deviceId}/probe_scale/`, payload),
   deviceSimulatePrint: (deviceId: string, payload: Record<string, unknown> = {}) =>
@@ -215,6 +329,7 @@ export const api = {
     return apiListAll<WeighingSession>(`/weighing-sessions/?${query.toString()}`);
   },
   createScaleReading: (payload: Record<string, unknown>) => apiPost<ScaleReading>("/scale-readings/", payload),
+  scaleReadingsByDevice: (deviceId: string) => apiListAll<ScaleReading>(`/scale-readings/?device=${encodeURIComponent(deviceId)}`),
   scaleReadingsBySession: (sessionId: string) => apiListAll<ScaleReading>(`/scale-readings/?session=${encodeURIComponent(sessionId)}`),
   evidenceFiles: () => apiList<EvidenceFile>("/evidence-files/"),
   evidenceFileUpload: (formData: FormData) => apiPostFormData<EvidenceFile>("/evidence-files/", formData),

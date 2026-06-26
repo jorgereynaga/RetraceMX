@@ -1,6 +1,10 @@
 import type { User } from "../types";
 
 export type AppPermission =
+  | "catalog.export"
+  | "catalog.import"
+  | "catalog.import.preview"
+  | "catalog.import.execute"
   | "users.manage"
   | "materials.manage"
   | "parties.manage"
@@ -16,8 +20,8 @@ export type AppPermission =
   | "auditor.view";
 
 const ROLE_PERMISSION_MATRIX: Record<string, AppPermission[]> = {
-  superadmin: ["users.manage", "materials.manage", "parties.manage", "centers.manage", "price-lists.manage", "purchases.manage", "processing.manage", "cashier.manage", "inventory.manage", "sales.manage", "logistics.manage", "routes.manage", "auditor.view"],
-  admin: ["users.manage", "materials.manage", "parties.manage", "centers.manage", "price-lists.manage", "purchases.manage", "processing.manage", "cashier.manage", "inventory.manage", "sales.manage", "logistics.manage", "routes.manage", "auditor.view"],
+  superadmin: ["catalog.export", "catalog.import", "catalog.import.preview", "catalog.import.execute", "users.manage", "materials.manage", "parties.manage", "centers.manage", "price-lists.manage", "purchases.manage", "processing.manage", "cashier.manage", "inventory.manage", "sales.manage", "logistics.manage", "routes.manage", "auditor.view"],
+  admin: ["catalog.export", "catalog.import", "catalog.import.preview", "catalog.import.execute", "users.manage", "materials.manage", "parties.manage", "centers.manage", "price-lists.manage", "purchases.manage", "processing.manage", "cashier.manage", "inventory.manage", "sales.manage", "logistics.manage", "routes.manage", "auditor.view"],
   weighing: ["materials.manage", "parties.manage", "centers.manage", "purchases.manage"],
   purchasing: ["materials.manage", "parties.manage", "centers.manage", "purchases.manage"],
   inventory: ["materials.manage", "parties.manage", "centers.manage", "processing.manage", "inventory.manage"],

@@ -1,7 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
+import { CatalogImportExportButton } from "../components/CatalogImportExportButton";
 import type { ProcessType } from "../types";
+import { useAuth } from "../context/AuthContext";
+import { userCan } from "../utils/permissions";
 
 type ProcessTypeFormState = {
   code: string;
@@ -22,6 +25,8 @@ function formatCount(value: number) {
 }
 
 export function ProcessTypesPage() {
+  const { user } = useAuth();
+  const canUseCatalogTools = userCan(user, "catalog.export");
   const [items, setItems] = useState<ProcessType[]>([]);
   const [form, setForm] = useState<ProcessTypeFormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -104,6 +109,11 @@ export function ProcessTypesPage() {
       title="Tipos de procesos"
       actions={<span className="muted">Catálogo independiente para configurar el módulo de procesamiento</span>}
     >
+      {canUseCatalogTools ? (
+        <div className="page-actions">
+          <CatalogImportExportButton catalog="process-types" />
+        </div>
+      ) : null}
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
       <section className="kpi-grid" style={{ marginBottom: 16 }}>

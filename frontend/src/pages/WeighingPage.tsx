@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../api/resources";
 import { Page } from "../components/Page";
-import type { Device } from "../types";
+import type { Device, ScaleReading as ScaleReadingRecord } from "../types";
 
-type ScaleReading = {
+type LiveReading = {
   device_id: string;
   device_name: string;
   kind: string;
@@ -22,7 +22,7 @@ const POLL_MS = 1800;
 export function WeighingPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
-  const [reading, setReading] = useState<ScaleReading | null>(null);
+  const [reading, setReading] = useState<LiveReading | null>(null);
   const [loadingRead, setLoadingRead] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [autoRead, setAutoRead] = useState(false);
@@ -53,17 +53,51 @@ export function WeighingPage() {
     if (!silent) setLoadingRead(true);
     setReadError(null);
     try {
+      const bridgeDevice = devices.find((d) => d.id === id);
+      const bridgeMode = Boolean(
+        bridgeDevice?.metadata &&
+          typeof bridgeDevice.metadata === "object" &&
+          (bridgeDevice.metadata as Record<string, unknown>).bridge_mode,
+      );
+      if (bridgeMode) {
+        const latest = (await api.scaleReadingsByDevice(id))[0] as ScaleReadingRecord | undefined;
+        const live = latest
+          ? {
+              device_id: latest.device,
+              device_name: bridgeDevice?.name ?? "Báscula",
+              kind: bridgeDevice?.kind ?? "secondary_scale",
+              raw_value: latest.raw_value ?? "",
+              weight_kg: latest.net_weight_kg ?? latest.gross_weight_kg ?? latest.tare_weight_kg ?? "0",
+              is_stable: latest.is_stable ?? true,
+              is_manual_fallback: bridgeDevice?.is_manual_fallback ?? false,
+              captured_at: latest.captured_at ?? new Date().toISOString(),
+            }
+          : null;
+        setReading(live);
+        setReadCount((c) => c + 1);
+        return live;
+      }
       const r = await api.deviceReadScale(id);
-      setReading(r);
+      const live = {
+        device_id: r.device_id,
+        device_name: r.device_name,
+        kind: r.kind,
+        raw_value: r.raw_value,
+        weight_kg: r.weight_kg,
+        is_stable: r.is_stable,
+        is_manual_fallback: r.is_manual_fallback,
+        captured_at: r.captured_at,
+      };
+      setReading(live);
       setReadCount((c) => c + 1);
-      return r;
+      return live;
     } catch {
       if (!silent) setReadError("Error al leer la báscula. Verifique la conexión o use entrada manual.");
       return null;
     } finally {
       if (!silent) setLoadingRead(false);
     }
-  }, []);
+  }, [devices]);
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);

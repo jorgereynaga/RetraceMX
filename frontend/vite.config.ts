@@ -9,7 +9,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: process.env.VITE_PROXY_TARGET ?? "http://localhost:8000",
+        target: process.env.VITE_PROXY_TARGET ?? "http://retracemx.local:8000",
         changeOrigin: true,
       },
     },

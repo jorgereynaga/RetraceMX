@@ -1,11 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+﻿import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/resources";
 import type { CollectionCenter } from "../types";
 import { Page } from "../components/Page";
+import { CatalogImportExportButton } from "../components/CatalogImportExportButton";
 import { Pagination } from "../components/Pagination";
 import { SortableHeader } from "../components/SortableHeader";
-import { matchesSearch, paginate } from "../utils/listing";
-import { sortByValue } from "../utils/listing";
+import { matchesSearch, paginate, sortByValue } from "../utils/listing";
 import { useAuth } from "../context/AuthContext";
 import { userCan } from "../utils/permissions";
 
@@ -32,6 +32,7 @@ export function CentersPage() {
   const canManageCenters = userCan(user, "centers.manage");
   const [items, setItems] = useState<CollectionCenter[]>([]);
   const [selectedCenterId, setSelectedCenterId] = useState("");
+  const [isCenterModalOpen, setIsCenterModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -80,16 +81,8 @@ export function CentersPage() {
     setPage(1);
   }, [sortDirection, sortKey]);
 
-  function toggleSort(nextKey: typeof sortKey) {
-    if (nextKey === sortKey) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortKey(nextKey);
-    setSortDirection("asc");
-  }
-
   useEffect(() => {
+    if (!isCenterModalOpen) return;
     if (selectedCenter) {
       setForm({
         code: selectedCenter.code,
@@ -103,10 +96,37 @@ export function CentersPage() {
     } else {
       setForm(emptyForm());
     }
-  }, [selectedCenter]);
+  }, [isCenterModalOpen, selectedCenter]);
+
+  function toggleSort(nextKey: typeof sortKey) {
+    if (nextKey === sortKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection("asc");
+  }
 
   function updateField(field: keyof typeof form, value: string | boolean) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function openCreateCenterModal() {
+    setSelectedCenterId("");
+    setIsCenterModalOpen(true);
+    setMessage(null);
+  }
+
+  function openEditCenterModal(center: CollectionCenter) {
+    setSelectedCenterId(center.id);
+    setIsCenterModalOpen(true);
+    setMessage(null);
+  }
+
+  function closeCenterModal() {
+    setIsCenterModalOpen(false);
+    setSelectedCenterId("");
+    setForm(emptyForm());
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -133,29 +153,27 @@ export function CentersPage() {
         await api.centerCreate(payload);
         setMessage("Centro creado.");
       }
-      setSelectedCenterId("");
-      setForm(emptyForm());
+      closeCenterModal();
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo guardar el centro");
     }
   }
 
-  async function removeCenter() {
-    if (!selectedCenter) return;
+  async function removeCenter(center: CollectionCenter | null = selectedCenter) {
+    if (!center) return;
     if (!canManageCenters) {
       setMessage("No tienes permiso para eliminar centros.");
       return;
     }
-    if (!window.confirm(`Seguro que deseas eliminar el centro ${selectedCenter.code} · ${selectedCenter.name}? Esta accion no se puede deshacer.`)) {
+    if (!window.confirm(`Seguro que deseas eliminar el centro ${center.code} · ${center.name}? Esta acción no se puede deshacer.`)) {
       return;
     }
     setMessage(null);
     try {
-      await api.centerDelete(selectedCenter.id);
+      await api.centerDelete(center.id);
       setMessage("Centro eliminado.");
-      setSelectedCenterId("");
-      setForm(emptyForm());
+      closeCenterModal();
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo eliminar el centro");
@@ -163,22 +181,28 @@ export function CentersPage() {
   }
 
   return (
-    <Page
-      title="Centros y destinos"
-      actions={<span className="muted">Acopios, fundidoras y destinos operativos con coordenadas</span>}
-    >
+    <Page title="Centros y destinos" actions={<span className="muted">Acopios, fundidoras y destinos operativos con coordenadas</span>}>
+      {userCan(user, "catalog.export") ? (
+        <div className="page-actions">
+          {canManageCenters ? (
+            <button type="button" className="btn-primary" onClick={openCreateCenterModal}>
+              Nuevo centro
+            </button>
+          ) : null}
+          <CatalogImportExportButton catalog="collection-centers" search={search} selectedIds={selectedCenterId ? [selectedCenterId] : []} />
+        </div>
+      ) : null}
       {message ? <div className="info-banner" style={{ marginBottom: 16 }}>{message}</div> : null}
 
-      <section className="metric-panel" style={{ marginBottom: 16 }}>
-        <span>Catálogo maestro</span>
-        <strong>{items.length}</strong>
-        <div className="muted" style={{ marginTop: 6 }}>
-          Registra centros de acopio, fundidoras y otros destinos con coordenadas de referencia.
-        </div>
-      </section>
-
-      <div className="metric-panel" style={{ marginBottom: 12 }}>
-        <label className="search-box">
+      <div className="catalog-top-row" style={{ marginBottom: 16 }}>
+        <section className="metric-panel">
+          <span>Total de registros</span>
+          <strong>{items.length}</strong>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Registra centros de acopio, fundidoras y otros destinos con coordenadas de referencia.
+          </div>
+        </section>
+        <label className="search-box metric-panel">
           Búsqueda rápida
           <input
             value={search}
@@ -187,53 +211,6 @@ export function CentersPage() {
           />
         </label>
       </div>
-
-      <form className="inline-form" onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
-        <label>
-          Código
-          <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="matriz" required />
-        </label>
-        <label>
-          Nombre
-          <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Centro Matriz" required />
-        </label>
-        <label>
-          Tipo
-          <select value={form.kind} onChange={(e) => updateField("kind", e.target.value as CollectionCenter["kind"])}>
-            <option value="collection">Centro de acopio</option>
-            <option value="smelter">Fundidora</option>
-            <option value="destination">Destino</option>
-          </select>
-        </label>
-        <label>
-          Dirección
-          <input value={form.address} onChange={(e) => updateField("address", e.target.value)} placeholder="Dirección operativa" />
-        </label>
-        <label>
-          Latitud
-          <input value={form.latitude} onChange={(e) => updateField("latitude", e.target.value)} placeholder="19.432610" />
-        </label>
-        <label>
-          Longitud
-          <input value={form.longitude} onChange={(e) => updateField("longitude", e.target.value)} placeholder="-99.133210" />
-        </label>
-        <label>
-          Activo
-          <div className="checkbox-field">
-            <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
-            <span>{form.is_active ? "Sí" : "No"}</span>
-          </div>
-        </label>
-        <button type="submit" disabled={!canManageCenters}>{selectedCenter ? "Actualizar" : "Crear"} centro</button>
-        <button type="button" className="ghost-button" onClick={() => { setSelectedCenterId(""); setForm(emptyForm()); }}>
-          Limpiar
-        </button>
-        {selectedCenter ? (
-          <button type="button" onClick={removeCenter} className="ghost-button" disabled={!canManageCenters}>
-            Eliminar
-          </button>
-        ) : null}
-      </form>
 
       <table className="table">
         <thead>
@@ -244,6 +221,7 @@ export function CentersPage() {
             <th><SortableHeader label="Dirección" active={sortKey === "address"} direction={sortDirection} onClick={() => toggleSort("address")} /></th>
             <th>Coordenadas</th>
             <th><SortableHeader label="Activo" active={sortKey === "active"} direction={sortDirection} onClick={() => toggleSort("active")} /></th>
+            <th>Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -259,12 +237,110 @@ export function CentersPage() {
               <td>{center.address}</td>
               <td>{center.latitude && center.longitude ? `${center.latitude}, ${center.longitude}` : "-"}</td>
               <td>{center.is_active ? "Sí" : "No"}</td>
+              <td>
+                <div className="table-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary table-action-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openEditCenterModal(center);
+                    }}
+                    disabled={!canManageCenters}
+                  >
+                    Modificar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-danger table-action-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void removeCenter(center);
+                    }}
+                    disabled={!canManageCenters}
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
 
       <Pagination {...paginatedItems} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} />
+
+      {isCenterModalOpen ? (
+        <div className="catalog-dialog-backdrop" role="presentation" onClick={closeCenterModal}>
+          <div
+            className="catalog-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedCenter ? "Editar centro" : "Nuevo centro"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="catalog-dialog-header">
+              <div>
+                <strong>{selectedCenter ? "Editar centro" : "Nuevo centro"}</strong>
+                <div className="muted">Catálogo maestro de centros y destinos</div>
+              </div>
+              <button type="button" className="ghost-button" onClick={closeCenterModal}>
+                Cerrar
+              </button>
+            </div>
+            <form className="inline-form" onSubmit={handleSubmit}>
+              <label>
+                Código
+                <input value={form.code} onChange={(e) => updateField("code", e.target.value)} placeholder="matriz" required />
+              </label>
+              <label>
+                Nombre
+                <input value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Centro Matriz" required />
+              </label>
+              <label>
+                Tipo
+                <select value={form.kind} onChange={(e) => updateField("kind", e.target.value as CollectionCenter["kind"])}>
+                  <option value="collection">Centro de acopio</option>
+                  <option value="smelter">Fundidora</option>
+                  <option value="destination">Destino</option>
+                </select>
+              </label>
+              <label>
+                Dirección
+                <input value={form.address} onChange={(e) => updateField("address", e.target.value)} placeholder="Dirección operativa" />
+              </label>
+              <label>
+                Latitud
+                <input value={form.latitude} onChange={(e) => updateField("latitude", e.target.value)} placeholder="19.432610" />
+              </label>
+              <label>
+                Longitud
+                <input value={form.longitude} onChange={(e) => updateField("longitude", e.target.value)} placeholder="-99.133210" />
+              </label>
+              <label>
+                Activo
+                <div className="checkbox-field">
+                  <input type="checkbox" checked={form.is_active} onChange={(e) => updateField("is_active", e.target.checked)} />
+                  <span>{form.is_active ? "Sí" : "No"}</span>
+                </div>
+              </label>
+              <div className="full-width-form-field" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="submit" className="btn-primary" disabled={!canManageCenters}>
+                  {selectedCenter ? "Actualizar" : "Crear"} centro
+                </button>
+                <button type="button" className="btn-secondary" onClick={closeCenterModal}>
+                  Cancelar
+                </button>
+                {selectedCenter ? (
+                  <button type="button" className="btn-danger" onClick={() => void removeCenter()} disabled={!canManageCenters}>
+                    Eliminar
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </Page>
   );
 }
